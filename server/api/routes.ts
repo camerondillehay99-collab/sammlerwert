@@ -55,7 +55,12 @@ add("POST", "/api/scan", async (req, _p, db) => {
     const limit = planLimits(user.plan).scansPerDay;
     if (n >= limit) throw paymentRequired(`Tageslimit von ${limit} Scans erreicht – mit Sammler oder Pro scannst du unbegrenzt.`);
   }
-  return json(await scanImage(db, buf, mime, user?.id ?? null));
+  try { return json(await scanImage(db, buf, mime, user?.id ?? null)); }
+  catch (e) {
+    // The vision model is an external dependency: surface its reason (never a stack) so a user sees why and we can fix it.
+    const msg = String((e as Error).message ?? e).replace(/\s+/g, " ").slice(0, 300);
+    throw new ApiError(502, `Erkennung fehlgeschlagen: ${msg}`, "scan_failed");
+  }
 });
 
 // ---------- auth ----------
