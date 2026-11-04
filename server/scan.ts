@@ -25,6 +25,7 @@ export interface ScanFacts {
   gradingCompany: string | null;
   grade: number | null;
   setHint: string | null;     // set name / symbol text if the model saw one
+  cert?: string | null;       // certification number on a graded slab's label
   raw: string;                // model output, for debugging and later training
 }
 
@@ -44,6 +45,7 @@ export const READ_PROMPT = `You are reading a photo of a single Pokémon trading
  "language": "<de|en|jp|fr|it|es|pt|other – language of the card text>",
  "finish": "<normal|holo|reverse – reverse means the frame outside the artwork is shiny>",
  "grading": "<null, or company and grade if the card sits in a graded slab, e.g. PSA 10, CGC 9.5, BGS 9>",
+ "cert": "<null, or the certification number printed on the slab label, digits only>",
  "set": "<set name or symbol text if visible, else null>"}
 If something is unreadable use null. Never guess a number you cannot read.`;
 
@@ -76,10 +78,13 @@ export function modelText(out: unknown): string {
   try { return JSON.stringify(r); } catch { return String(r); }
 }
 
+// OCR models like to read a Latin O or a Cyrillic capital O (U+041E) where a zero is printed.
+const CYRILLIC_O = new RegExp("[O" + String.fromCharCode(0x41e) + "]", "g");
+
 /** "199/165" → { number: "199", total: 165 }; "SV049/SV122" → { "SV049", 122 }; "006" → { "006", null }. */
 export function parseNumber(s: string | null | undefined): { number: string | null; total: number | null } {
   if (!s) return { number: null, total: null };
-  const t = s.toUpperCase().replace(/\s+/g, "").replace(/[OО]/g, "0").replace(/[^A-Z0-9\/]/g, "");
+  const t = s.toUpperCase().replace(/\s+/g, "").replace(CYRILLIC_O, "0").replace(/[^A-Z0-9\/]/g, "");
   const m = t.match(/^([A-Z]{0,4}\d{1,4}[A-Z]?)(?:\/([A-Z]{0,4})?(\d{1,4}))?$/);
   if (!m) return { number: null, total: null };
   return { number: m[1]!, total: m[3] ? Number(m[3]) : null };
@@ -109,6 +114,8 @@ export function parseFacts(raw: string): ScanFacts {
   const g = (str("grading") ?? "").match(/\b(PSA|BGS|CGC|GSG|AP|TAG|ACE|SGC)\s*[-:]?\s*(10|9\.5|9|8\.5|8|7\.5|7|6|5|4|3|2|1)(?!\d)/i);
   if (g) { facts.gradingCompany = g[1]!.toUpperCase(); facts.grade = Number(g[2]); }
   facts.setHint = str("set");
+  const cert = (str("cert") ?? "").replace(/\D/g, "");
+  facts.cert = facts.gradingCompany && cert.length >= 6 && cert.length <= 12 ? cert : null;
   return facts;
 }
 
@@ -118,7 +125,8 @@ interface CandRow { id: string; local_id: string; name_de: string | null; name_e
  * Score catalogue rows against the printed facts. The number inside a set is nearly unique, the set size
  * separates sets that reuse numbers, the name decides between the rest.
  */
-export function scoreCandidate(row: CandRow, facts: ScanFacts): { score: number; reasons: string[] } {
+export interface MatchOptions { setWeight?: number } // how much an exact set-name hit counts (1.5 for a scanned symbol, 4 for a CSV "Set" column)
+export function scoreCandidate(row: CandRow, facts: ScanFacts, opts: MatchOptions = {}): { score: number; reasons: string[] } {
   let score = 0; const reasons: string[] = [];
   if (facts.number && numberKey(row.local_id) === numberKey(facts.number)) { score += 4; reasons.push("Nummer"); }
   if (facts.total != null) {
@@ -141,7 +149,12 @@ export function scoreCandidate(row: CandRow, facts: ScanFacts): { score: number;
     if (facts.language === "en" && n === en) score += 0.5;
   }
   const hint = normalizeName(facts.setHint);
-  if (hint && (normalizeName(row.set_name_de).includes(hint) || normalizeName(row.set_name_en).includes(hint) || normalizeName(row.abbreviation) === hint)) { score += 1.5; reasons.push("Set"); }
+  if (hint) {
+    const sde = normalizeName(row.set_name_de), sen = normalizeName(row.set_name_en), w = opts.setWeight ?? 1.5;
+    if (sde === hint || sen === hint || normalizeName(row.abbreviation) === hint) { score += w; reasons.push("Set"); }
+    else if (sde.includes(hint) || sen.includes(hint) || hint.includes(sen && sen.length > 3 ? sen : "\u0000")) { score += w * 0.6; reasons.push("Set (ähnlich)"); }
+    else if (w >= 3) score -= 1; // the import said which set – a different one must lose
+  }
   // Newer sets are what people scan most at shows; a tiny tie-breaker, never decisive.
   if (row.release_date) score += Math.min(0.4, Math.max(0, (Number(row.release_date.slice(0, 4)) - 1999) / 100));
   return { score, reasons };
@@ -150,7 +163,7 @@ export function scoreCandidate(row: CandRow, facts: ScanFacts): { score: number;
 const SELECT = `SELECT c.id, c.local_id, c.name_de, c.name_en, c.set_id, s.name_de AS set_name_de, s.name_en AS set_name_en, s.abbreviation, s.card_count_official, s.card_count_total, s.release_date
   FROM cards c JOIN sets s ON s.id = c.set_id`;
 
-export async function findCandidates(db: SqlDb, facts: ScanFacts, limit = 6): Promise<ScanCandidate[]> {
+export async function findCandidates(db: SqlDb, facts: ScanFacts, limit = 6, opts: MatchOptions = {}): Promise<ScanCandidate[]> {
   const rows = new Map<string, CandRow>();
   if (facts.number) {
     const key = numberKey(facts.number);
@@ -164,7 +177,7 @@ export async function findCandidates(db: SqlDb, facts: ScanFacts, limit = 6): Pr
     for (const chunk of [ids.slice(0, 90)]) if (chunk.length) for (const r of await db.all<CandRow>(`${SELECT} WHERE c.id IN (${chunk.map(() => "?").join(",")})`, chunk)) rows.set(r.id, r);
   }
   if (!rows.size) return [];
-  const scored = [...rows.values()].map((r) => ({ id: r.id, ...scoreCandidate(r, facts) })).sort((a, b) => b.score - a.score).slice(0, limit);
+  const scored = [...rows.values()].map((r) => ({ id: r.id, ...scoreCandidate(r, facts, opts) })).sort((a, b) => b.score - a.score).slice(0, limit);
   const summaries = await getCardSummaries(db, scored.map((s) => s.id));
   return scored.filter((s) => summaries.has(s.id)).map((s) => ({ card: summaries.get(s.id)!, score: Math.round(s.score * 10) / 10, reasons: s.reasons }));
 }

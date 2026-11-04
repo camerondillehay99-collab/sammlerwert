@@ -119,6 +119,11 @@ export interface SaleRecord {
   verified: boolean;
 }
 
+export interface Collection {
+  id: number; name: string; isDefault: boolean; description: string | null; color: string | null; shareToken: string | null; sortOrder: number; createdAt: string;
+  itemCount: number; quantity: number;
+}
+
 export interface CollectionItem {
   id: number;
   collectionId: number;
@@ -135,6 +140,7 @@ export interface CollectionItem {
   notes: string | null;
   imagePath: string | null;
   createdAt: string;
+  source: string | null;             // manual | scan | import:<source> | psa
   card: CardSummary;
   quote: PriceQuote | null;
   currentValue: number | null; // per unit
@@ -158,13 +164,16 @@ export interface PortfolioSummary {
 
 export interface Insight { kind: "info" | "up" | "down" | "warn"; title: string; text: string; cardId?: string }
 
-export interface User { id: number; email: string; name: string | null; plan: Plan; planStatus: string | null; locale: string; createdAt: string }
+export interface User { id: number; email: string; name: string | null; plan: Plan; planStatus: string | null; locale: string; createdAt: string; totpEnabled: boolean }
+/** Answer of /api/auth/me, login and register: either a full session or a pending second-factor step. */
+export type MfaStep = "setup" | "verify" | null;
+export interface AuthResponse { user: User | null; mfa: MfaStep; email?: string }
 
 export interface ApiError { error: string; code?: string }
 
 export interface ScanFactsPublic {
   name: string | null; number: string | null; total: number | null; language: string | null;
-  finish: "normal" | "holo" | "reverse" | null; gradingCompany: string | null; grade: number | null; setHint: string | null;
+  finish: "normal" | "holo" | "reverse" | null; gradingCompany: string | null; grade: number | null; setHint: string | null; cert?: string | null;
 }
 export interface ScanCandidatePublic { card: CardSummary; score: number; reasons: string[] }
 export interface ScanResultPublic { facts: ScanFactsPublic; best: ScanCandidatePublic | null; alternatives: ScanCandidatePublic[]; confidence: number; ms: number }

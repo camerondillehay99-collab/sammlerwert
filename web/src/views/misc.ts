@@ -3,7 +3,7 @@ import { h, svg, icons, fmt, label, toast, cardName } from "../lib/dom.ts";
 import { api, HttpError, invalidate } from "../lib/api.ts";
 import { navigate } from "../lib/router.ts";
 import { state, setUser, setTheme } from "../lib/store.ts";
-import { cardTile, empty, field, section } from "../components/ui.ts";
+import { cardTile, empty, field, modal, section } from "../components/ui.ts";
 
 export async function market(_p: Record<string, string>, query: URLSearchParams): Promise<HTMLElement> {
   const lang = query.get("lang") === "en" ? "en" : "de";
@@ -15,28 +15,6 @@ export async function market(_p: Record<string, string>, query: URLSearchParams)
     section("Aufsteiger", m.up.length ? h("div", { class: "tiles" }, ...m.up.map((x) => cardTile(x.card, { value: x.value, trend: x.trend }))) : empty("Noch keine Daten", "Trends erscheinen, sobald Preishistorie vorliegt.")),
     section("Absteiger", m.down.length ? h("div", { class: "tiles" }, ...m.down.map((x) => cardTile(x.card, { value: x.value, trend: x.trend }))) : empty("Noch keine Daten", "")),
   );
-}
-
-export function authView(mode: "login" | "register") {
-  return (_p: Record<string, string>, query: URLSearchParams): HTMLElement => {
-    const next = query.get("next") ?? "/";
-    const email = h("input", { type: "email", name: "email", required: true, autocomplete: "email", placeholder: "du@beispiel.de" });
-    const pw = h("input", { type: "password", name: "password", required: true, minlength: 8, autocomplete: mode === "login" ? "current-password" : "new-password", placeholder: mode === "login" ? "Passwort" : "Mindestens 8 Zeichen" });
-    const name = h("input", { type: "text", name: "name", autocomplete: "nickname", placeholder: "Wie sollen wir dich nennen?" });
-    const submit = h("button", { class: "btn primary lg full", type: "submit" }, mode === "login" ? "Anmelden" : "Konto erstellen");
-    const form = h("form", { class: "form auth-form" },
-      mode === "register" ? field("Name (optional)", name) : null, field("E-Mail", email), field("Passwort", pw), submit,
-      h("p", { class: "muted center" }, mode === "login" ? ["Noch kein Konto? ", h("a", { href: `/registrieren?next=${encodeURIComponent(next)}` }, "Registrieren")] : ["Schon dabei? ", h("a", { href: `/login?next=${encodeURIComponent(next)}` }, "Anmelden")]));
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault(); submit.disabled = true;
-      try {
-        const r = mode === "login" ? await api.login(email.value, pw.value) : await api.register(email.value, pw.value, name.value);
-        setUser(r.user); invalidate(); toast(mode === "login" ? "Willkommen zurück!" : "Willkommen bei Sammlerwert!"); navigate(next);
-      } catch (err) { submit.disabled = false; toast((err as Error).message, "error"); }
-    });
-    return h("div", { class: "page narrow" }, h("header", { class: "page-head center" }, h("div", null, h("p", { class: "eyebrow" }, "Konto"), h("h1", null, mode === "login" ? "Anmelden" : "Kostenlos registrieren"),
-      mode === "register" ? h("p", { class: "muted" }, "Bis zu 50 Karten kostenlos. Keine Zahlungsdaten nötig.") : null)), form);
-  };
 }
 
 export async function settings(_p: Record<string, string>, query: URLSearchParams): Promise<HTMLElement> {
@@ -58,11 +36,48 @@ export async function settings(_p: Record<string, string>, query: URLSearchParam
   return h("div", { class: "page narrow" },
     h("header", { class: "page-head" }, h("div", null, h("p", { class: "eyebrow" }, "Konto"), h("h1", null, "Einstellungen"))),
     section("Profil", h("div", { class: "row" }, field("Name", name), field("E-Mail", h("input", { value: u.email, disabled: true }))), h("div", { class: "actions-row" }, save)),
+    await securityPanel(),
     section("Darstellung", theme),
     billing, watch, admin,
     section("Daten & Datenschutz", h("p", { class: "muted" }, "Deine Sammlung gehört dir. Export jederzeit als CSV (ab Sammler-Tarif). Keine Werbung, kein Tracking, Server in der EU."),
       h("div", { class: "actions-row" }, h("button", { class: "btn ghost", onClick: async () => { await api.logout(); setUser(null); invalidate(); navigate("/"); } }, svg(icons.logout, 16), " Abmelden"))),
   );
+}
+
+/** Two-factor status, fresh recovery codes, other sessions. */
+async function securityPanel(): Promise<HTMLElement> {
+  const st = await api.mfaStatus().catch(() => ({ enabled: false, enabledAt: null, recoveryCodesLeft: 0 }));
+  const codesBtn = h("button", { class: "btn ghost", onClick: () => {
+    const inp = h("input", { inputmode: "numeric", autocomplete: "one-time-code", placeholder: "123 456", class: "code-input" }) as HTMLInputElement;
+    const go = h("button", { class: "btn primary", type: "submit" }, "Neue Codes erzeugen");
+    const f = h("form", { class: "form" }, h("p", null, "Die alten Wiederherstellungscodes verlieren ihre Gültigkeit. Zur Bestätigung den aktuellen Code aus der App eingeben."), field("Code", inp), h("div", { class: "actions" }, go));
+    f.addEventListener("submit", async (e) => {
+      e.preventDefault(); go.disabled = true;
+      try {
+        const r = await api.mfaRecovery(inp.value);
+        const text = r.recoveryCodes.join("\n");
+        f.replaceChildren(h("p", null, "Deine neuen Codes – jeder gilt einmal. Wir zeigen sie nur jetzt."), h("ul", { class: "recovery-codes" }, ...r.recoveryCodes.map((c) => h("li", { class: "mono" }, c))),
+          h("div", { class: "actions-row" }, h("button", { class: "btn ghost", type: "button", onClick: async () => { try { await navigator.clipboard.writeText(text); toast("Kopiert."); } catch { toast("Bitte markieren und kopieren.", "error"); } } }, svg(icons.copy, 14), " Kopieren"),
+            h("a", { class: "btn ghost", href: `data:text/plain;charset=utf-8,${encodeURIComponent(text)}`, download: "sammlerwert-wiederherstellungscodes.txt" }, svg(icons.download, 14), " Datei"), h("button", { class: "btn primary", type: "button", onClick: () => close() }, "Fertig")));
+      } catch (err) { go.disabled = false; toast((err as Error).message, "error"); }
+    });
+    const close = modal("Wiederherstellungscodes", f);
+    setTimeout(() => inp.focus(), 60);
+  } }, svg(icons.lock, 16), " Neue Wiederherstellungscodes");
+  const revoke = h("button", { class: "btn ghost", onClick: async () => { await api.revokeOtherSessions(); toast("Andere Geräte abgemeldet."); } }, svg(icons.logout, 16), " Andere Geräte abmelden");
+  return section("Sicherheit",
+    st.enabled
+      ? h("p", null, svg(icons.shield, 16), " Zwei-Faktor-Anmeldung ist ", h("b", null, "aktiv"), st.enabledAt ? h("span", { class: "muted" }, ` seit ${fmt.date(st.enabledAt)}`) : null, h("span", { class: "muted" }, ` · ${st.recoveryCodesLeft} Wiederherstellungscodes übrig`))
+      : h("div", { class: "notice warn" }, svg(icons.warn, 18), h("div", null, h("b", null, "Dein Konto ist noch nicht mit 2FA geschützt."), h("p", null, "Richte jetzt eine Authenticator-App ein – eine Minute, und deine Sammlung ist sicher."))),
+    h("div", { class: "actions-row" },
+      st.enabled ? codesBtn : h("a", { class: "btn primary", href: "/2fa/einrichten?next=/einstellungen" }, svg(icons.shield, 16), " 2FA einrichten"),
+      st.enabled ? h("a", { class: "btn ghost", href: "/2fa/einrichten?next=/einstellungen" }, "Authenticator wechseln") : null,
+      revoke));
+}
+
+export async function watchlistView(): Promise<HTMLElement> {
+  if (!state.user) { navigate("/login?next=/watchlist", true); return h("div"); }
+  return h("div", { class: "page narrow" }, h("header", { class: "page-head" }, h("div", null, h("p", { class: "eyebrow" }, "Beobachten"), h("h1", null, "Watchlist"), h("p", { class: "muted" }, "Karten, die du im Blick behalten willst – auf jeder Kartenseite über „Beobachten“."))), section("Karten", await watchlist()));
 }
 
 async function watchlist(): Promise<HTMLElement> {
@@ -103,9 +118,9 @@ export async function pricing(): Promise<HTMLElement> {
   return h("div", { class: "page" },
     h("header", { class: "page-head center" }, h("div", null, h("p", { class: "eyebrow" }, "Tarife"), h("h1", null, "Einfach. Fair. Jederzeit kündbar."), h("p", { class: "muted" }, "Preise inkl. MwSt. Monatlich kündbar.", !hlt.billing ? " Zahlungen werden in Kürze freigeschaltet." : ""))),
     h("div", { class: "plans" },
-      plan("Kostenlos", "0 €", ["Bis zu 50 Karten", "Deutsche Marktwerte & Trends", "Suche, Sets, Markt", "Verkäufe melden"], state.user ? h("a", { class: "btn ghost full", href: "/sammlung" }, "Dein aktueller Start") : h("a", { class: "btn ghost full", href: "/registrieren" }, "Kostenlos starten")),
-      plan("Sammler", "4,99 € / Monat", ["Bis zu 2.500 Karten", "Vollständige Wert-Historie", "Gewinn/Verlust & Insights", "25 Preisalarme", "CSV-Export"], buy("sammler", "Sammler werden"), true),
-      plan("Pro", "9,99 € / Monat", ["Unbegrenzte Karten", "Mehrere Sammlungen", "Unbegrenzte Preisalarme", "Prioritäts-Aktualisierung deiner Karten", "Früher Zugang zu neuen Funktionen"], buy("pro", "Pro werden")),
+      plan("Kostenlos", "0 €", ["Bis zu 50 Karten, 3 Sammlungen", "Deutsche Marktwerte & Trends", "Scanner, Suche, Sets, Markt", "Import von Collectr & Card Ladder", "Verkäufe melden"], state.user ? h("a", { class: "btn ghost full", href: "/sammlung" }, "Dein aktueller Start") : h("a", { class: "btn ghost full", href: "/registrieren" }, "Kostenlos starten")),
+      plan("Sammler", "4,99 € / Monat", ["Bis zu 2.500 Karten, 15 Sammlungen", "Vollständige Wert-Historie", "Gewinn/Verlust & Insights", "25 Preisalarme", "CSV-Export & Teilen-Links"], buy("sammler", "Sammler werden"), true),
+      plan("Pro", "9,99 € / Monat", ["Unbegrenzte Karten & Sammlungen", "Unbegrenzte Scans & Preisalarme", "Prioritäts-Aktualisierung deiner Karten", "PSA-Zertifikatsabgleich", "Früher Zugang zu neuen Funktionen"], buy("pro", "Pro werden")),
     ),
     h("p", { class: "muted center small" }, "Händler-/API-Zugang auf Anfrage."));
 }

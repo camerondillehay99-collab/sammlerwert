@@ -43,6 +43,11 @@ export function buildConfig(e: EnvMap) {
       insightsEnabled: e.EBAY_INSIGHTS_ENABLED == null ? null : bool(e.EBAY_INSIGHTS_ENABLED, true),
       maxCardsPerRun: Number(env("EBAY_MAX_CARDS_PER_RUN", "700")),
     },
+    psa: {
+      /** PSA Public API token (psacard.com → Public API). Enables certificate lookups for slabs and PSA list imports. */
+      token: env("PSA_API_TOKEN"),
+      base: env("PSA_API_BASE", "https://api.psacard.com/publicapi"),
+    },
     stripe: {
       secretKey: env("STRIPE_SECRET_KEY"),
       webhookSecret: env("STRIPE_WEBHOOK_SECRET"),
@@ -50,8 +55,8 @@ export function buildConfig(e: EnvMap) {
       pricePro: env("STRIPE_PRICE_PRO"),
     },
     limits: {
-      free: { items: 50, collections: 1, history: false, alerts: 0, exports: false, scansPerDay: 30 },
-      sammler: { items: 2500, collections: 5, history: true, alerts: 25, exports: true, scansPerDay: 1000 },
+      free: { items: 50, collections: 3, history: false, alerts: 0, exports: false, scansPerDay: 30 },
+      sammler: { items: 2500, collections: 15, history: true, alerts: 25, exports: true, scansPerDay: 1000 },
       pro: { items: Infinity, collections: Infinity, history: true, alerts: Infinity, exports: true, scansPerDay: Infinity },
     },
   };

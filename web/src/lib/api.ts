@@ -1,4 +1,4 @@
-import type { CardDetail, CardSummary, CollectionItem, PortfolioSummary, ScanResultPublic, SetSummary, User } from "../../../shared/types.ts";
+import type { AuthResponse, CardDetail, CardSummary, Collection, CollectionItem, PortfolioSummary, ScanResultPublic, SetSummary, User } from "../../../shared/types.ts";
 
 export class HttpError extends Error { constructor(public status: number, message: string, public code?: string) { super(message); } }
 
@@ -26,12 +26,41 @@ export function invalidate(prefix = "") { for (const k of [...cache.keys()]) if 
 
 export interface Movers { card: CardSummary; value: number; trend: number; nSales: number }
 export type Me = User & { isAdmin?: boolean };
+export type AuthResult = Omit<AuthResponse, "user"> & { user: Me | null };
+
+export interface ImportRowPublic {
+  line: number; input: Record<string, string | undefined>;
+  parsed: { language: string; variant: string; condition: string; gradingCompany: string | null; grade: number | null; certNo: string | null; quantity: number; purchasePriceEur: number | null; purchasedAt: string | null; notes: string | null; collectionName: string | null };
+  match: { card: CardSummary; confidence: number; reasons: string[] } | null; alternatives: CardSummary[]; status: "ok" | "unsure" | "none" | "skip"; problem?: string;
+}
+export interface ImportPreviewPublic { source: string; delimiter: string; columns: Record<string, string>; rows: ImportRowPublic[]; stats: { total: number; ok: number; unsure: number; none: number; skip: number }; psaLookups: number }
+export interface PsaCertPublic { certNo: string; year: string | null; brand: string | null; cardNumber: string | null; subject: string | null; variety: string | null; grade: number | null; gradeText: string | null; totalPopulation: number | null; populationHigher: number | null }
+export interface SharedCollection { collection: { name: string; description: string | null; owner: string }; items: Array<{ id: number; cardId: string; card: CardSummary; language: string; variant: string; condition: string; gradingCompany: string | null; grade: number | null; quantity: number; currentValue: number | null; trend30: number | null }>; totalValue: number; cardCount: number }
 
 export const api = {
   health: () => cached<{ ok: boolean; stats: Record<string, number | string | null>; ebay: boolean; billing: boolean }>("/api/health", 60_000),
-  me: () => call<{ user: Me | null }>("GET", "/api/auth/me"),
-  register: (email: string, password: string, name: string) => call<{ user: Me }>("POST", "/api/auth/register", { email, password, name }),
-  login: (email: string, password: string) => call<{ user: Me }>("POST", "/api/auth/login", { email, password }),
+  me: () => call<AuthResult>("GET", "/api/auth/me"),
+  register: (email: string, password: string, name: string) => call<AuthResult>("POST", "/api/auth/register", { email, password, name }),
+  login: (email: string, password: string) => call<AuthResult>("POST", "/api/auth/login", { email, password }),
+  mfaSetup: (code?: string) => call<{ secret: string; otpauth: string; email: string }>("POST", "/api/auth/2fa/setup", { code }),
+  mfaEnable: (code: string) => call<{ user: Me; recoveryCodes: string[] }>("POST", "/api/auth/2fa/enable", { code }),
+  mfaVerify: (code: string) => call<{ user: Me; usedRecovery?: boolean; recoveryCodesLeft?: number | null }>("POST", "/api/auth/2fa/verify", { code }),
+  mfaRecovery: (code: string) => call<{ recoveryCodes: string[] }>("POST", "/api/auth/2fa/recovery", { code }),
+  mfaStatus: () => call<{ enabled: boolean; enabledAt: string | null; recoveryCodesLeft: number }>("GET", "/api/auth/2fa/status"),
+  sessions: () => call<{ sessions: Array<{ id: string; created_at: string; expires_at: string; user_agent: string | null }> }>("GET", "/api/auth/sessions"),
+  revokeOtherSessions: () => call<{ ok: true }>("POST", "/api/auth/sessions/revoke-others"),
+  collections: () => call<{ items: Collection[] }>("GET", "/api/collections"),
+  createCollection: (body: { name: string; description?: string | null; color?: string | null }) => call<{ collection: Collection }>("POST", "/api/collections", body),
+  updateCollection: (id: number, body: Record<string, unknown>) => call<{ collection: Collection }>("PATCH", `/api/collections/${id}`, body),
+  deleteCollection: (id: number, withItems = false) => call<{ ok: true }>("DELETE", `/api/collections/${id}${withItems ? "?withItems=1" : ""}`),
+  shareCollection: (id: number) => call<{ token: string; url: string }>("POST", `/api/collections/${id}/share`),
+  unshareCollection: (id: number) => call<{ ok: true }>("DELETE", `/api/collections/${id}/share`),
+  shared: (token: string) => call<SharedCollection>("GET", `/api/share/${encodeURIComponent(token)}`),
+  bulkItems: (body: { action: "delete" | "move" | "update"; ids: number[]; collectionId?: number; patch?: Record<string, unknown> }) => call<{ ok: true; affected: number }>("POST", "/api/items/bulk", body),
+  importCapabilities: () => cached<{ psa: boolean; sources: string[]; maxRows: number }>("/api/import/capabilities", 300_000),
+  importPreview: (text: string, source?: string, defaultLanguage?: string) => call<ImportPreviewPublic>("POST", "/api/import/preview", { text, source, defaultLanguage }),
+  importCommit: (body: { rows: Record<string, unknown>[]; collectionId?: number; merge?: boolean; source?: string }) => call<{ ok: true; imported: number; merged: number; skipped: number; collectionId: number }>("POST", "/api/import/commit", body),
+  psaCert: (cert: string) => call<{ cert: PsaCertPublic; facts: Record<string, unknown>; best: { card: CardSummary; score: number; reasons: string[] } | null; alternatives: Array<{ card: CardSummary }> }>("POST", "/api/psa/cert", { cert }),
   logout: () => call<{ ok: true }>("POST", "/api/auth/logout"),
   updateMe: (patch: { name?: string; locale?: string }) => call<{ user: Me }>("PATCH", "/api/auth/me", patch),
   search: (q: string, opts: { set?: string | null; sort?: string; limit?: number; offset?: number } = {}) => {
@@ -51,7 +80,7 @@ export const api = {
   movers: (lang = "de") => cached<{ up: Movers[]; down: Movers[] }>(`/api/market/movers?lang=${lang}`, 120_000),
   reportSale: (cardId: string, body: Record<string, unknown>) => call<CardDetail>("POST", `/api/cards/${encodeURIComponent(cardId)}/sales`, body),
   portfolio: () => call<PortfolioSummary>("GET", "/api/portfolio"),
-  items: () => call<{ items: CollectionItem[] }>("GET", "/api/items"),
+  items: (collectionId?: number | null) => call<{ items: CollectionItem[] }>("GET", `/api/items${collectionId ? `?collection=${collectionId}` : ""}`),
   addItem: (body: Record<string, unknown>) => call<{ item: CollectionItem }>("POST", "/api/items", body),
   updateItem: (id: number, body: Record<string, unknown>) => call<{ item: CollectionItem }>("PATCH", `/api/items/${id}`, body),
   deleteItem: (id: number) => call<{ ok: true }>("DELETE", `/api/items/${id}`),

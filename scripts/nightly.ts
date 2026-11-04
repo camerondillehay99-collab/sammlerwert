@@ -17,7 +17,8 @@ import { refreshCardmarketFromNetwork } from "../server/ingest/cardmarket.ts";
 import { matchCardsToCardmarket } from "../server/ingest/matcher.ts";
 import { ebayConfigured, runEbayIngest } from "../server/ingest/ebay.ts";
 import { recomputeFactors } from "../server/pricing/engine.ts";
-import { rebuildFts } from "../server/ingest/tcgdex.ts";
+import { purgeExcludedSeries, rebuildFts } from "../server/ingest/tcgdex.ts";
+import { migrate } from "../server/db/migrate.ts";
 import { catalogStats } from "../server/services/catalog.ts";
 
 const log = (m: string) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${m}`);
@@ -38,12 +39,16 @@ try {
   await db.exec(`CREATE TABLE IF NOT EXISTS ebay_refresh (card_id TEXT PRIMARY KEY REFERENCES cards(id), last_at TEXT NOT NULL, listings INTEGER NOT NULL DEFAULT 0, sales INTEGER NOT NULL DEFAULT 0, error TEXT);
 CREATE TABLE IF NOT EXISTS scans (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, created_at TEXT NOT NULL, facts TEXT, card_id TEXT, confidence REAL, ms INTEGER);
 CREATE TABLE IF NOT EXISTS deploy_patches (id INTEGER PRIMARY KEY AUTOINCREMENT, batch TEXT NOT NULL, path TEXT NOT NULL, seq INTEGER NOT NULL DEFAULT 0, content TEXT, deleted INTEGER NOT NULL DEFAULT 0, message TEXT, created_at TEXT NOT NULL, applied_at TEXT);`);
+  const migrated = await migrate(db);
+  if (migrated.length) log(`Schema erweitert: ${migrated.join(", ")}`);
   log(`Start. Stand: ${JSON.stringify(await catalogStats(db))}`);
 
   // Bootstrap: right after the first deploy only the catalogue is seeded (write budget). Build the search index first
   // and skip card details this night so FTS + guide stay well under 100k written rows.
   let bootstrapped = false;
   if (!(await db.first<{ n: number }>("SELECT COUNT(*) n FROM cards_fts"))!.n) { log("FTS-Index leer – baue auf …"); await rebuildFts(db); bootstrapped = true; }
+  const purged = await purgeExcludedSeries(db);
+  if (purged) log(`Ausgeschlossene Sets entfernt (TCG Pocket): ${purged}`);
 
   if (steps.has("details") && !bootstrapped) {
     const pending = (await db.first<{ n: number }>("SELECT COUNT(*) n FROM cards WHERE detail_loaded = 0"))!.n;

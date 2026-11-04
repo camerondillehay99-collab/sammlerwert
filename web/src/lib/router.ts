@@ -4,6 +4,7 @@ interface Route { re: RegExp; keys: string[]; view: View; title?: string }
 const routes: Route[] = [];
 let outlet: HTMLElement;
 let onNavigate: ((path: string) => void) | null = null;
+let guard: ((path: string) => string | null) | null = null;
 
 export function route(pattern: string, view: View, title?: string) {
   const keys: string[] = [];
@@ -22,6 +23,8 @@ let seq = 0;
 export async function render() {
   const my = ++seq;
   const path = location.pathname;
+  const redirect = guard?.(path);
+  if (redirect && redirect !== path) { history.replaceState(null, "", redirect); seq--; return render(); }
   const query = new URLSearchParams(location.search);
   for (const r of routes) {
     const m = path.match(r.re);
@@ -47,8 +50,9 @@ export async function render() {
   navigate("/", true);
 }
 
-export function startRouter(target: HTMLElement, cb: (path: string) => void) {
-  outlet = target; onNavigate = cb;
+/** `guardFn` runs before every render and may return a path to go to instead (e.g. a pending second factor). */
+export function startRouter(target: HTMLElement, cb: (path: string) => void, guardFn?: (path: string) => string | null) {
+  outlet = target; onNavigate = cb; guard = guardFn ?? null;
   window.addEventListener("popstate", render);
   document.addEventListener("click", (e) => {
     const a = (e.target as HTMLElement).closest("a");

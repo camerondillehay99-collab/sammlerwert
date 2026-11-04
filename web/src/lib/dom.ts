@@ -73,6 +73,15 @@ export const icons = {
   filter: `<path d="M3 5h18l-7 8v6l-4 2v-8z"/>`,
   download: `<path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 19h16"/>`,
   flag: `<path d="M5 21V4h11l-1 4h5l-2 6H9"/>`,
+  more: `<circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/>`,
+  folder: `<path d="M3 6h6l2 2h10v11H3z"/>`,
+  share: `<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.6M8.2 13.2l7.6 4.6"/>`,
+  copy: `<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>`,
+  minus: `<path d="M5 12h14"/>`,
+  phone: `<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>`,
+  lock: `<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>`,
+  upload: `<path d="M12 15V3M7 8l5-5 5 5"/><path d="M4 19h16"/>`,
+  check2: `<path d="m4 12 5 5L20 6"/>`,
 };
 
 export const fmt = {
@@ -137,8 +146,10 @@ export function debounce<T extends (...a: never[]) => void>(fn: T, ms: number): 
 export function clear(el: HTMLElement) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
 
 let toastTimer: ReturnType<typeof setTimeout>;
-export function toast(message: string, kind: "ok" | "error" = "ok") {
+export function toast(message: string, kind: "ok" | "error" = "ok", action?: { label: string; onClick: () => void }) {
   const el = document.getElementById("toast")!;
-  el.textContent = message; el.className = `toast show ${kind}`;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 3000);
+  el.replaceChildren(h("span", null, message));
+  if (action) el.appendChild(h("button", { class: "toast-action", onClick: () => { el.classList.remove("show"); action.onClick(); } }, action.label));
+  el.className = `toast show ${kind}`;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), action ? 6000 : 3000);
 }

@@ -6,11 +6,11 @@ import { nowIso } from "./db/index.ts";
 
 export const SESSION_COOKIE = "sw_session";
 
-interface UserRow { id: number; email: string; name: string | null; plan: string; plan_status: string | null; locale: string; created_at: string; is_admin: number }
+interface UserRow { id: number; email: string; name: string | null; plan: string; plan_status: string | null; locale: string; created_at: string; is_admin: number; totp_enabled: number | null }
 export type AuthUser = User & { isAdmin: boolean };
 
 export function toUser(r: UserRow): AuthUser {
-  return { id: r.id, email: r.email, name: r.name, plan: r.plan as Plan, planStatus: r.plan_status, locale: r.locale, createdAt: r.created_at, isAdmin: !!r.is_admin };
+  return { id: r.id, email: r.email, name: r.name, plan: r.plan as Plan, planStatus: r.plan_status, locale: r.locale, createdAt: r.created_at, isAdmin: !!r.is_admin, totpEnabled: !!r.totp_enabled };
 }
 
 // ---------- password hashing: PBKDF2-SHA256 via WebCrypto (Workers cap iterations at 100k) ----------
@@ -59,11 +59,35 @@ export async function login(db: SqlDb, email: string, password: string): Promise
   return toUser(row);
 }
 
-export async function createSession(db: SqlDb, userId: number, userAgent: string | null): Promise<{ id: string; setCookie: string }> {
+/**
+ * A session starts "pending" when the second factor is still missing: right after registration (2FA setup is
+ * mandatory) and after a password login of a user with 2FA. Pending sessions are invisible to currentUser();
+ * only the /api/auth/2fa/* routes accept them, and they expire after 15 minutes.
+ */
+export async function createSession(db: SqlDb, userId: number, userAgent: string | null, mfaPending = false): Promise<{ id: string; setCookie: string }> {
   const id = crypto.randomUUID() + crypto.randomUUID().replace(/-/g, "");
+  const ttlSec = mfaPending ? 15 * 60 : config.sessionDays * 86_400;
+  const expires = new Date(Date.now() + ttlSec * 1000).toISOString();
+  await db.run("INSERT INTO sessions(id, user_id, expires_at, user_agent, mfa_pending) VALUES (?, ?, ?, ?, ?)", [id, userId, expires, userAgent, mfaPending ? 1 : 0]);
+  return { id, setCookie: cookie(SESSION_COOKIE, id, { maxAge: ttlSec, secure: config.cookieSecure }) };
+}
+
+/** Promote a pending session to a full one (second factor verified or just set up). */
+export async function completeMfa(db: SqlDb, sessionId: string): Promise<string> {
   const expires = new Date(Date.now() + config.sessionDays * 86_400_000).toISOString();
-  await db.run("INSERT INTO sessions(id, user_id, expires_at, user_agent) VALUES (?, ?, ?, ?)", [id, userId, expires, userAgent]);
-  return { id, setCookie: cookie(SESSION_COOKIE, id, { maxAge: config.sessionDays * 86_400, secure: config.cookieSecure }) };
+  await db.run("UPDATE sessions SET mfa_pending = 0, expires_at = ? WHERE id = ?", [expires, sessionId]);
+  return cookie(SESSION_COOKIE, sessionId, { maxAge: config.sessionDays * 86_400, secure: config.cookieSecure });
+}
+
+export interface SessionState { sessionId: string; user: AuthUser; pending: boolean }
+/** The session behind the cookie, pending or not – for the 2FA routes and /me. */
+export async function sessionState(db: SqlDb, req: Request): Promise<SessionState | null> {
+  const sid = parseCookies(req)[SESSION_COOKIE];
+  if (!sid) return null;
+  const row = await db.first<UserRow & { expires_at: string; mfa_pending: number | null }>("SELECT u.*, s.expires_at, s.mfa_pending FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?", [sid]);
+  if (!row) return null;
+  if (row.expires_at < nowIso()) { await db.run("DELETE FROM sessions WHERE id = ?", [sid]); return null; }
+  return { sessionId: sid, user: toUser(row), pending: !!row.mfa_pending };
 }
 
 export async function destroySession(db: SqlDb, req: Request): Promise<string> {
@@ -78,12 +102,8 @@ export async function getUserById(db: SqlDb, id: number): Promise<AuthUser | nul
 }
 
 export async function currentUser(db: SqlDb, req: Request): Promise<AuthUser | null> {
-  const sid = parseCookies(req)[SESSION_COOKIE];
-  if (!sid) return null;
-  const row = await db.first<UserRow & { expires_at: string }>("SELECT u.*, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?", [sid]);
-  if (!row) return null;
-  if (row.expires_at < nowIso()) { await db.run("DELETE FROM sessions WHERE id = ?", [sid]); return null; }
-  return toUser(row);
+  const s = await sessionState(db, req);
+  return s && !s.pending ? s.user : null;
 }
 
 export async function requireUser(db: SqlDb, req: Request): Promise<AuthUser> {

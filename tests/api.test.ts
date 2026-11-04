@@ -6,6 +6,7 @@ import { matchRoute } from "../server/api/routes.ts";
 import { rebuildFts } from "../server/ingest/tcgdex.ts";
 import { recomputeFactors } from "../server/pricing/engine.ts";
 import { ApiError } from "../server/http.ts";
+import { totp } from "../server/totp.ts";
 
 const db = await openBunDb(":memory:");
 useDb(db);
@@ -58,14 +59,77 @@ describe("API", () => {
     expect((await call("POST", "/api/auth/register", { email: "bad", password: "12345678" })).status).toBe(400);
     expect((await call("POST", "/api/auth/register", { email: "a@b.de", password: "short" })).status).toBe(400);
     const r = await call("POST", "/api/auth/register", { email: "a@b.de", password: "passwort123", name: "Cam" });
-    expect(r.status).toBe(201); expect(cookie).toContain("sw_session=");
+    expect(r.status).toBe(201); expect(cookie).toContain("sw_session="); expect(r.body.mfa).toBe("setup"); expect(r.body.user).toBeNull();
     expect((await call("POST", "/api/auth/register", { email: "A@b.de", password: "passwort123" })).body.code).toBe("email_taken");
+    // pending session: not signed in until 2FA is set up
+    expect((await call("GET", "/api/auth/me")).body.mfa).toBe("setup");
+    expect((await call("GET", "/api/portfolio")).status).toBe(401);
+    const setup = await call("POST", "/api/auth/2fa/setup", {});
+    expect(setup.status).toBe(200); expect(setup.body.otpauth).toContain("otpauth://totp/Sammlerwert:a%40b.de?secret=");
+    expect((await call("POST", "/api/auth/2fa/enable", { code: "000000" })).body.code).toBe("invalid_code");
+    const en = await call("POST", "/api/auth/2fa/enable", { code: await totp(setup.body.secret) });
+    expect(en.status).toBe(200); expect(en.body.recoveryCodes.length).toBe(8); expect(en.body.user.totpEnabled).toBe(true);
     expect((await call("GET", "/api/auth/me")).body.user.email).toBe("a@b.de");
     const saved = cookie; cookie = "";
     expect((await call("GET", "/api/portfolio")).status).toBe(401);
     expect((await call("POST", "/api/auth/login", { email: "a@b.de", password: "wrong" })).status).toBe(401);
-    expect((await call("POST", "/api/auth/login", { email: "a@b.de", password: "passwort123" })).status).toBe(200);
+    // login → second factor → full session; recovery code works once
+    const lg = await call("POST", "/api/auth/login", { email: "a@b.de", password: "passwort123" });
+    expect(lg.status).toBe(200); expect(lg.body.mfa).toBe("verify");
+    expect((await call("GET", "/api/portfolio")).status).toBe(401);
+    expect((await call("POST", "/api/auth/2fa/verify", { code: "123456" })).status).toBe(400);
+    const rc = en.body.recoveryCodes[0];
+    const v = await call("POST", "/api/auth/2fa/verify", { code: rc });
+    expect(v.status).toBe(200); expect(v.body.usedRecovery).toBe(true); expect(v.body.recoveryCodesLeft).toBe(7);
+    expect((await call("GET", "/api/auth/me")).body.user.email).toBe("a@b.de");
+    cookie = "";
+    await call("POST", "/api/auth/login", { email: "a@b.de", password: "passwort123" });
+    expect((await call("POST", "/api/auth/2fa/verify", { code: rc })).status).toBe(400); // single use
+    expect((await call("POST", "/api/auth/2fa/verify", { code: await totp(setup.body.secret) })).status).toBe(200);
     cookie = saved;
+  });
+  test("collections: create, move, bulk, share, delete", async () => {
+    const cols = (await call("GET", "/api/collections")).body.items;
+    expect(cols.length).toBe(1); expect(cols[0].isDefault).toBe(true);
+    const c2 = await call("POST", "/api/collections", { name: "Binder 151" });
+    expect(c2.status).toBe(201);
+    const it = await call("POST", "/api/items", { cardId: "sv03.5-025", collectionId: c2.body.collection.id, source: "scan" });
+    expect(it.body.item.collectionId).toBe(c2.body.collection.id); expect(it.body.item.source).toBe("scan");
+    const it2 = await call("POST", "/api/items", { cardId: "sv03.5-199" });
+    expect((await call("GET", `/api/items?collection=${c2.body.collection.id}`)).body.items.length).toBe(1);
+    const mv = await call("POST", "/api/items/bulk", { action: "move", ids: [it2.body.item.id], collectionId: c2.body.collection.id });
+    expect(mv.body.affected).toBe(1);
+    expect((await call("GET", `/api/items?collection=${c2.body.collection.id}`)).body.items.length).toBe(2);
+    const sh = await call("POST", `/api/collections/${c2.body.collection.id}/share`);
+    expect(sh.body.url).toMatch(/^\/s\//);
+    const pubCookie = cookie; cookie = "";
+    const pub = await call("GET", `/api/share/${sh.body.token}`);
+    expect(pub.status).toBe(200); expect(pub.body.items.length).toBe(2); expect(pub.body.items[0].purchasePriceEur).toBeUndefined();
+    cookie = pubCookie;
+    expect((await call("DELETE", `/api/collections/${c2.body.collection.id}/share`)).status).toBe(200);
+    expect((await call("POST", "/api/items/bulk", { action: "update", ids: [it.body.item.id], patch: { condition: "EX" } })).body.affected).toBe(1);
+    expect((await call("DELETE", `/api/collections/${c2.body.collection.id}`)).status).toBe(200); // items move to default
+    expect((await call("GET", "/api/items")).body.items.length).toBe(2);
+    expect((await call("POST", "/api/items/bulk", { action: "delete", ids: [it.body.item.id, it2.body.item.id] })).body.affected).toBe(2);
+    expect((await call("GET", "/api/items")).body.items.length).toBe(0);
+  });
+  test("import: Collectr-style CSV is matched and committed, duplicates merged", async () => {
+    const csv = "Card Name,Set,Card Number,Condition,Quantity,Grade,Purchase Price,Language\nCharizard ex,151,199/165,Near Mint,1,,$150.00,German\nPikachu,151,25,Lightly Played,3,PSA 10,12,\nNope,Unknown Set,999,,1,,,";
+    const pv = await call("POST", "/api/import/preview", { text: csv });
+    expect(pv.status).toBe(200); expect(pv.body.source).toBe("collectr");
+    const rows = pv.body.rows;
+    expect(rows[0].match.card.id).toBe("sv03.5-199"); expect(rows[0].status).toBe("ok"); expect(rows[0].parsed.language).toBe("de"); expect(rows[0].parsed.purchasePriceEur).toBe(138);
+    expect(rows[1].match.card.id).toBe("sv03.5-025"); expect(rows[1].parsed.gradingCompany).toBe("PSA"); expect(rows[1].parsed.grade).toBe(10); expect(rows[1].parsed.condition).toBe("EX"); expect(rows[1].parsed.language).toBe("en");
+    expect(rows[2].status).toBe("none");
+    const commitRows = rows.filter((r: { match: unknown }) => r.match).map((r: { match: { card: { id: string } }; parsed: Record<string, unknown> }) => ({ cardId: r.match.card.id, ...r.parsed }));
+    const c1 = await call("POST", "/api/import/commit", { rows: commitRows, source: "collectr" });
+    expect(c1.status).toBe(201); expect(c1.body.imported).toBe(4);
+    const c2 = await call("POST", "/api/import/commit", { rows: commitRows, source: "collectr" });
+    expect(c2.body.merged).toBe(4); expect(c2.body.imported).toBe(0);
+    const items = (await call("GET", "/api/items")).body.items;
+    expect(items.length).toBe(2); expect(items.find((i: { cardId: string }) => i.cardId === "sv03.5-025").quantity).toBe(6);
+    expect(items[0].source).toBe("import:collectr");
+    await call("POST", "/api/items/bulk", { action: "delete", ids: items.map((i: { id: number }) => i.id) });
   });
   test("collection CRUD, valuation and plan limits", async () => {
     const add = await call("POST", "/api/items", { cardId: "sv03.5-199", language: "de", condition: "EX", purchasePriceEur: 120, quantity: 2 });

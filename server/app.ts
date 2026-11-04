@@ -4,6 +4,7 @@ import { ApiError, json } from "./http.ts";
 import { hasPath, matchRoute } from "./api/routes.ts";
 import { currentUser } from "./auth.ts";
 import { blobStore } from "./storage.ts";
+import { ensureSchema } from "./db/migrate.ts";
 
 export const SECURITY_HEADERS: Record<string, string> = {
   "x-content-type-options": "nosniff",
@@ -25,6 +26,7 @@ export async function handleApp(req: Request, db: SqlDb, log: (m: string) => voi
   const url = new URL(req.url);
   try {
     if (url.pathname.startsWith("/api/")) {
+      await ensureSchema(db); // columns added after the first deploy (one PRAGMA round per isolate)
       const m = matchRoute(req.method, url.pathname);
       if (!m) return withHeaders(json({ error: hasPath(url.pathname) ? "Methode nicht erlaubt." : "Nicht gefunden." }, hasPath(url.pathname) ? 405 : 404));
       return withHeaders(await m.route.handler(req, m.params, db));

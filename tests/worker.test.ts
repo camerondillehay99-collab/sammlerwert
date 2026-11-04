@@ -4,6 +4,7 @@ import { Database } from "bun:sqlite";
 import worker from "../worker/index.ts";
 import type { D1DatabaseLike, D1PreparedStatementLike } from "../server/db/d1.ts";
 import { SCHEMA } from "../server/db/bun-sqlite.ts";
+import { totp } from "../server/totp.ts";
 
 function fakeD1(): D1DatabaseLike & { raw: Database } {
   const raw = new Database(":memory:");
@@ -61,6 +62,8 @@ describe("worker", () => {
     expect((await call("GET", "/api/health")).body.ok).toBe(true);
     expect((await call("GET", "/api/search?q=glurak")).body.items[0].valueDe).toBe(320);
     expect((await call("POST", "/api/auth/register", { email: "admin@example.com", password: "passwort123" })).status).toBe(201);
+    const setup = await call("POST", "/api/auth/2fa/setup", {}); // registration → mandatory 2FA before the session is usable
+    expect((await call("POST", "/api/auth/2fa/enable", { code: await totp(setup.body.secret) })).status).toBe(200);
     const add = await call("POST", "/api/items", { cardId: "sv03.5-199", language: "de", variant: "normal", condition: "NM", purchasePriceEur: 200 });
     expect(add.status).toBe(201); expect(add.body.item.variant).toBe("holo"); expect(add.body.item.currentValue).toBe(320);
     expect((await call("GET", "/api/portfolio")).body.totalValue).toBe(320);

@@ -51,31 +51,58 @@ const CARD_CONFLICT = `ON CONFLICT(id) DO UPDATE SET name_de = COALESCE(excluded
   image = COALESCE(excluded.image, cards.image), image_en = COALESCE(excluded.image_en, cards.image_en), updated_at = excluded.updated_at`;
 
 /**
+ * Series that are not part of the physical trading card game and must never show up in search, sets or the scanner.
+ * Pokémon TCG Pocket (series "tcgp", sets A1, A2a, B1 …) is a mobile game with its own cards and no Cardmarket prices.
+ */
+export const EXCLUDED_SERIES: ReadonlySet<string> = new Set(["tcgp"]);
+const POCKET_SET_ID = /^(?:[AB]\d+[a-z]?|P-[A-Z])$/;
+export function isExcludedSet(setId: string, seriesId: string | null | undefined): boolean {
+  return (seriesId != null && EXCLUDED_SERIES.has(seriesId)) || POCKET_SET_ID.test(setId);
+}
+
+/** Remove excluded series from an existing database (catalogue, FTS, portfolio rows stay – they reference cards that no longer exist and are skipped). */
+export async function purgeExcludedSeries(db: SqlDb): Promise<number> {
+  const ids = (await db.all<{ id: string; series_id: string | null }>("SELECT id, series_id FROM sets")).filter((r) => isExcludedSet(r.id, r.series_id)).map((r) => r.id);
+  if (!ids.length) return 0;
+  const inList = ids.map(() => "?").join(",");
+  await db.batch([
+    stmt(`DELETE FROM cards_fts WHERE card_id IN (SELECT id FROM cards WHERE set_id IN (${inList}))`, ...ids),
+    stmt(`DELETE FROM cards WHERE set_id IN (${inList})`, ...ids),
+    stmt(`DELETE FROM sets WHERE id IN (${inList})`, ...ids),
+    stmt("DELETE FROM series WHERE id IN ('tcgp')"),
+  ]);
+  return ids.length;
+}
+
+/**
  * Import series, sets and brief cards. Idempotent.
  * With `onlyNewCards`, existing cards are left untouched and only new ones are inserted (+ their FTS rows) –
  * the mode the nightly job uses against D1, where every written row counts.
  */
 export async function importCatalog(db: SqlDb, input: CatalogInput, onlyNewCards = false): Promise<TcgdexImportStats> {
   const now = nowIso();
+  const enSet = new Map(input.setsEn.map((s) => [s.id, s]));
   const enSetName = new Map(input.setsEn.map((s) => [s.id, s.name ?? null]));
   const enCard = new Map(input.cardsEn.map((c) => [c.id, c]));
   const deCard = new Map(input.cardsDe.map((c) => [c.id, c]));
 
-  const seriesRows: SqlValue[][] = input.seriesDe.map((s) => [s.id, s.name ?? null, s.logo ?? null]);
+  const seriesRows: SqlValue[][] = input.seriesDe.filter((s) => !EXCLUDED_SERIES.has(s.id)).map((s) => [s.id, s.name ?? null, s.logo ?? null]);
   const setRows: SqlValue[][] = [];
   const cardRows = new Map<string, SqlValue[]>();
+  const excludedSets = new Set<string>();
   for (const brief of input.setsDe) {
     const d = input.setDetails.get(brief.id) ?? null;
+    if (isExcludedSet(brief.id, d?.serie?.id)) { excludedSets.add(brief.id); continue; }
     if (d?.serie?.id && !seriesRows.some((r) => r[0] === d.serie!.id)) seriesRows.push([d.serie.id, d.serie.name ?? null, null]);
     const abbr = typeof d?.abbreviation === "string" ? d.abbreviation : d?.abbreviation?.official ?? null;
     setRows.push([brief.id, d?.serie?.id ?? null, brief.name ?? d?.name ?? null, enSetName.get(brief.id) ?? null, abbr, d?.releaseDate ?? null,
-      d?.cardCount?.official ?? brief.cardCount?.official ?? null, d?.cardCount?.total ?? brief.cardCount?.total ?? null, brief.logo ?? d?.logo ?? null, brief.symbol ?? d?.symbol ?? null, now]);
+      d?.cardCount?.official ?? brief.cardCount?.official ?? null, d?.cardCount?.total ?? brief.cardCount?.total ?? null, brief.logo ?? d?.logo ?? enSet.get(brief.id)?.logo ?? null, brief.symbol ?? d?.symbol ?? enSet.get(brief.id)?.symbol ?? null, now]);
     for (const c of d?.cards ?? []) {
       const de = deCard.get(c.id), en = enCard.get(c.id);
       cardRows.set(c.id, [c.id, brief.id, String(c.localId ?? c.id.split("-").pop()), c.name ?? de?.name ?? null, en?.name ?? null, c.image ?? de?.image ?? null, en?.image ?? null, now]);
     }
   }
-  const setIds = new Set(input.setsDe.map((s) => s.id));
+  const setIds = new Set(input.setsDe.map((s) => s.id).filter((id) => !excludedSets.has(id)));
   for (const c of input.cardsDe) {
     if (cardRows.has(c.id)) continue;
     const setId = c.id.slice(0, c.id.lastIndexOf("-"));

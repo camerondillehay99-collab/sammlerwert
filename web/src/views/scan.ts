@@ -3,16 +3,31 @@
  * The camera stream stays open between scans so the next card is one tap away. Falls back to the native
  * camera/file picker where getUserMedia is unavailable (older browsers, desktop without camera).
  */
-import type { CardDetail, ScanResultPublic, ScanCandidatePublic } from "../../../shared/types.ts";
+import type { CardDetail, CollectionItem, ScanResultPublic, ScanCandidatePublic } from "../../../shared/types.ts";
 import { h, svg, icons, fmt, label, cardImage, cardName, clear, toast, imgOr } from "../lib/dom.ts";
-import { api, HttpError } from "../lib/api.ts";
+import { api, HttpError, invalidate } from "../lib/api.ts";
 import { navigate } from "../lib/router.ts";
-import { addToCollection, confidenceBadge, placeholder, trendPill } from "../components/ui.ts";
+import { addToCollection, confidenceBadge, placeholder, trendPill, section } from "../components/ui.ts";
+import { qrSvg } from "../lib/qr.ts";
+
+/** The scanner is a phone feature: it needs the rear camera and one hand. Desktop gets a QR code that opens the same page on the phone. */
+export const isPhone = () => matchMedia("(max-width: 760px)").matches;
+
+function desktopHint(): HTMLElement {
+  const url = `${location.origin}/scan`;
+  const qr = h("div", { class: "qr-box" }); qr.innerHTML = qrSvg(url, 180);
+  return h("div", { class: "page narrow" },
+    h("header", { class: "page-head" }, h("div", null, h("p", { class: "eyebrow" }, "Scanner"), h("h1", null, "Scannen geht am Handy"),
+      h("p", { class: "muted" }, "Der Kartenscanner nutzt die Handykamera: Karte in den Rahmen halten, ein Tipp – Wert, Grades und letzte Verkäufe. Am Desktop gibt es stattdessen die Suche und den Import."))),
+    section("Auf dem Handy öffnen", h("div", { class: "qr-row" }, qr, h("div", null, h("p", null, "Kamera des Handys auf den Code richten – Sammlerwert öffnet direkt den Scanner. Als App installieren: im Browser „Zum Home-Bildschirm“."), h("p", { class: "muted small" }, url)))),
+    h("div", { class: "actions-row" }, h("a", { class: "btn primary", href: "/suche" }, svg(icons.search, 16), " Karte suchen"), h("a", { class: "btn ghost", href: "/import" }, svg(icons.download, 16), " Sammlung importieren")));
+}
 
 let stream: MediaStream | null = null;
 function stopCamera() { stream?.getTracks().forEach((t) => t.stop()); stream = null; }
 
 export async function scanView(): Promise<HTMLElement> {
+  if (!isPhone()) return desktopHint();
   const root = h("div", { class: "page scan-page" });
   const video = h("video", { class: "scan-video", playsinline: "", autoplay: "", muted: "" }) as HTMLVideoElement;
   video.setAttribute("playsinline", ""); video.muted = true;
@@ -99,15 +114,15 @@ export async function scanView(): Promise<HTMLElement> {
     const box = h("div", { class: "scan-card" });
     result.append(box);
     box.append(h("p", { class: "muted small" }, `Gelesen: ${read || "–"} · ${(r.ms / 1000).toFixed(1)} s`));
-    renderCandidate(box, r.best, r.confidence, true);
+    renderCandidate(box, r.best, r.confidence, true, r);
     if (r.alternatives.length) box.append(h("details", { class: "scan-alts", open: r.confidence < 0.6 ? true : null },
       h("summary", null, r.confidence < 0.6 ? "Nicht sicher – meinst du eine dieser Karten?" : "Nicht richtig? Alternativen"),
-      h("div", { class: "scan-alt-list" }, ...r.alternatives.map((a) => h("button", { class: "scan-alt", onClick: () => { clear(box); box.append(h("p", { class: "muted small" }, `Gelesen: ${read}`)); renderCandidate(box, a, null, true); } },
+      h("div", { class: "scan-alt-list" }, ...r.alternatives.map((a) => h("button", { class: "scan-alt", onClick: () => { clear(box); box.append(h("p", { class: "muted small" }, `Gelesen: ${read}`)); renderCandidate(box, a, null, true, r); } },
         imgOr(cardImage(a.card), () => placeholder(a.card), { width: 48, height: 67 }), h("span", null, h("b", null, cardName(a.card)), h("small", { class: "muted" }, ` #${a.card.localId} · ${a.card.setNameDe ?? a.card.setNameEn ?? ""}`)), h("em", null, fmt.eur(a.card.valueDe)))))));
     result.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  function renderCandidate(box: HTMLElement, c: ScanCandidatePublic, confidence: number | null, loadDetail: boolean) {
+  function renderCandidate(box: HTMLElement, c: ScanCandidatePublic, confidence: number | null, loadDetail: boolean, r: ScanResultPublic) {
     const card = c.card;
     const head = h("div", { class: "scan-hit" },
       imgOr(cardImage(card), () => placeholder(card), { width: 110, height: 153 }),
@@ -116,10 +131,35 @@ export async function scanView(): Promise<HTMLElement> {
         h("h2", null, cardName(card)),
         h("div", { class: "price-big" }, h("strong", null, fmt.eur(card.valueDe)), card.trend30 != null ? trendPill(card.trend30, " / 30 T.") : null),
         h("div", { class: "scan-badges" }, confidenceBadge(card.confidenceDe), confidence != null ? h("span", { class: `badge conf-${confidence >= 0.75 ? "high" : confidence >= 0.45 ? "mid" : "low"}` }, `Erkennung ${(confidence * 100).toFixed(0)} %`) : null)));
+    // Add → the button becomes an "in your collection" control with quantity and remove, so a mis-tap is one tap away from undone.
+    const f = r.facts;
+    const prefill = { language: (f.language ?? undefined) as CollectionItem["language"] | undefined, variant: (f.finish && f.finish !== "normal" ? f.finish : undefined) as CollectionItem["variant"] | undefined, gradingCompany: (f.gradingCompany ?? undefined) as CollectionItem["gradingCompany"] | undefined, grade: f.grade ?? undefined, certNo: f.cert ?? undefined };
+    const addBtn = h("button", { class: "btn primary" }, svg(icons.plus, 16), " Zur Sammlung");
+    const slot = h("span", { class: "scan-add-slot" }, addBtn);
+    const drawOwned = (item: CollectionItem) => {
+      const minus = h("button", { class: "btn ghost sm", "aria-label": item.quantity > 1 ? "Eins weniger" : "Entfernen", onClick: async () => {
+        try {
+          if (item.quantity > 1) { item = (await api.updateItem(item.id, { quantity: item.quantity - 1 })).item; drawOwned(item); }
+          else { await api.deleteItem(item.id); slot.replaceChildren(addBtn); toast("Aus der Sammlung entfernt."); }
+          invalidate(); document.dispatchEvent(new CustomEvent("collection:changed"));
+        } catch (e) { toast((e as Error).message, "error"); }
+      } }, svg(item.quantity > 1 ? icons.minus : icons.trash, 14));
+      const plus = h("button", { class: "btn ghost sm", "aria-label": "Eins mehr", onClick: async () => { try { item = (await api.updateItem(item.id, { quantity: item.quantity + 1 })).item; invalidate(); drawOwned(item); } catch (e) { toast((e as Error).message, "error"); } } }, svg(icons.plus, 14));
+      const edit = h("button", { class: "btn ghost sm", onClick: () => addToCollection(card, item) }, svg(icons.edit, 14), " Details");
+      slot.replaceChildren(h("span", { class: "owned-pill" }, svg(icons.check, 14), ` In Sammlung · ${item.quantity}×`), minus, plus, edit);
+    };
+    addBtn.addEventListener("click", () => addToCollection(card, undefined, { source: "scan", prefill, onSaved: drawOwned }));
+    const psaChip = f.cert && f.gradingCompany === "PSA" ? h("button", { class: "chip", onClick: async (e: Event) => {
+      const b = e.currentTarget as HTMLButtonElement; b.disabled = true;
+      try { const p = await api.psaCert(f.cert!); toast(p.best && p.best.card.id !== card.id ? `PSA sagt ${cardName(p.best.card)} #${p.best.card.localId} – ${p.cert.gradeText ?? ""}` : `PSA bestätigt: ${p.cert.subject ?? ""} ${p.cert.gradeText ?? ""} · Pop ${p.cert.totalPopulation ?? "?"}`); if (p.cert.grade != null) prefill.grade = p.cert.grade; }
+      catch (err) { toast((err as Error).message, "error"); }
+      b.disabled = false;
+    } }, svg(icons.shield, 12), ` PSA #${f.cert} prüfen`) : null;
     const actions = h("div", { class: "actions-row" },
-      h("button", { class: "btn primary", onClick: () => addToCollection(card) }, svg(icons.plus, 16), " Zur Sammlung"),
+      slot,
       h("a", { class: "btn ghost", href: `/karte/${encodeURIComponent(card.id)}` }, "Alle Details"),
-      h("button", { class: "btn ghost", onClick: () => { result.hidden = true; clear(result); window.scrollTo({ top: 0, behavior: "smooth" }); } }, svg(icons.camera, 16), " Nächste Karte"));
+      h("button", { class: "btn ghost", onClick: () => { result.hidden = true; clear(result); window.scrollTo({ top: 0, behavior: "smooth" }); } }, svg(icons.camera, 16), " Nächste Karte"),
+      psaChip);
     const more = h("div", { class: "scan-more" }, h("p", { class: "muted small" }, "Lade Verkäufe …"));
     box.append(head, actions, more);
     if (loadDetail) api.card(card.id).then((d) => more.replaceChildren(...detailBlocks(d))).catch(() => more.replaceChildren());

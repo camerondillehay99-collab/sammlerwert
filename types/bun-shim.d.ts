@@ -23,7 +23,7 @@ declare module "bun:test" {
   export function expect(value: unknown): {
     toBe(v: unknown): void; toEqual(v: unknown): void; toBeNull(): void; toBeCloseTo(v: number, d?: number): void;
     toBeGreaterThan(v: number): void; toBeLessThan(v: number): void; toBeGreaterThanOrEqual(v: number): void; toBeLessThanOrEqual(v: number): void;
-    toContain(v: unknown): void; toBeTruthy(): void; toBeUndefined(): void; toThrow(): void; not: { toContain(v: unknown): void; toBe(v: unknown): void };
+    toContain(v: unknown): void; toBeTruthy(): void; toBeUndefined(): void; toMatch(re: RegExp | string): void; toMatchObject(v: unknown): void; toThrow(): void; not: { toContain(v: unknown): void; toBe(v: unknown): void };
   };
 }
 interface BunFile extends Blob { readonly size: number; text(): Promise<string>; json(): Promise<unknown>; exists(): Promise<boolean> }

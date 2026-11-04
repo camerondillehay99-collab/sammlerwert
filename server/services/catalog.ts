@@ -47,7 +47,7 @@ async function ftsReady(db: SqlDb): Promise<boolean> {
 
 /** Build an FTS5 prefix query from free text: "glurak 199" → "glurak"* "199"* */
 export function ftsQuery(q: string): string {
-  const tokens = q.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").match(/[\p{L}\p{N}]+/gu) ?? [];
+  const tokens = q.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").match(/[\p{L}\p{N}]+/gu) ?? [];
   return tokens.map((t) => `"${t}"*`).join(" ");
 }
 
@@ -133,8 +133,13 @@ export async function listSets(db: SqlDb): Promise<SetSummary[]> {
   return (await db.all<SetRow>(`SELECT s.*, se.name_de AS series_name, (SELECT COUNT(*) FROM cards c WHERE c.set_id = s.id) cards_loaded
     FROM sets s LEFT JOIN series se ON se.id = s.series_id ORDER BY s.release_date DESC NULLS LAST, s.id DESC`)).map((s) => ({
     id: s.id, seriesId: s.series_id, seriesName: s.series_name, nameDe: s.name_de, nameEn: s.name_en, abbreviation: s.abbreviation, releaseDate: s.release_date,
-    cardCountOfficial: s.card_count_official, cardCountTotal: s.card_count_total, logo: s.logo, symbol: s.symbol, cardsLoaded: s.cards_loaded,
+    cardCountOfficial: s.card_count_official, cardCountTotal: s.card_count_total, logo: s.logo ?? assetFallback(s, "logo"), symbol: s.symbol ?? assetFallback(s, "symbol"), cardsLoaded: s.cards_loaded,
   }));
+}
+
+/** Most German set entries at TCGdex carry no logo/symbol; the English asset exists for nearly every set and is language-neutral. */
+function assetFallback(s: { id: string; series_id: string | null }, kind: "logo" | "symbol"): string | null {
+  return s.series_id ? `https://assets.tcgdex.net/en/${s.series_id}/${s.id}/${kind}` : null;
 }
 
 export async function getSet(db: SqlDb, id: string): Promise<SetSummary | null> {

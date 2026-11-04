@@ -156,7 +156,11 @@ CREATE TABLE IF NOT EXISTS users (
   stripe_subscription_id TEXT,
   plan_renews_at TEXT,
   is_admin INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  totp_secret TEXT,                      -- base32, set during 2FA setup (pending until totp_enabled = 1)
+  totp_enabled INTEGER NOT NULL DEFAULT 0,
+  totp_enabled_at TEXT,
+  recovery_codes TEXT                    -- JSON array of SHA-256 hashes, each single-use
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -164,7 +168,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   expires_at TEXT NOT NULL,
-  user_agent TEXT
+  user_agent TEXT,
+  mfa_pending INTEGER NOT NULL DEFAULT 0 -- 1 = password accepted, second factor (or its setup) still missing
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
@@ -173,7 +178,11 @@ CREATE TABLE IF NOT EXISTS collections (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   is_default INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  share_token TEXT,                      -- public read-only link (/s/<token>), null = private
+  description TEXT,
+  color TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS collection_items (
@@ -192,7 +201,8 @@ CREATE TABLE IF NOT EXISTS collection_items (
   notes TEXT,
   image_path TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  updated_at TEXT
+  updated_at TEXT,
+  source TEXT                            -- manual | scan | import:<source> | psa
 );
 CREATE INDEX IF NOT EXISTS idx_items_collection ON collection_items(collection_id);
 CREATE INDEX IF NOT EXISTS idx_items_card ON collection_items(card_id);
@@ -257,4 +267,12 @@ CREATE TABLE IF NOT EXISTS deploy_patches (
   message TEXT,
   created_at TEXT NOT NULL,
   applied_at TEXT
+);
+
+-- PSA certificate lookups (public PSA API), cached so a cert is fetched once.
+CREATE TABLE IF NOT EXISTS psa_certs (
+  cert_no TEXT PRIMARY KEY,
+  fetched_at TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  card_id TEXT
 );

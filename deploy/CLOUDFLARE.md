@@ -45,6 +45,18 @@ Der Nightly-Job protokolliert `rowsWritten` pro Lauf (Actions-Log und Tabelle `j
 ## Secrets im Worker (Stripe)
 `deploy\cloudflare-secrets.cmd` oder `npx wrangler secret put STRIPE_SECRET_KEY` usw. Webhook-URL: `https://<url>/api/billing/webhook`, Events `customer.subscription.*`. `PUBLIC_URL` in `wrangler.toml` auf die echte URL setzen.
 
+## PSA-Zertifikate (optional)
+Auf psacard.com → Konto → „Public API“ einen Access Token erzeugen und als Worker-Secret `PSA_API_TOKEN` hinterlegen
+(Dashboard → Worker → Settings → Variables and Secrets, oder `wrangler secret put PSA_API_TOKEN`). Damit prüfen Scanner,
+Karte-hinzufügen-Dialog und der Import PSA-Zertifikatsnummern direkt bei PSA (Karte, Set, Note, Population). PSA bietet
+keinen „Vault“- oder Sammlungs-Export per API – der Weg ist: Zertifikatsnummern (Liste/CSV) importieren oder Slab scannen.
+Antworten werden in `psa_certs` gecacht; ohne Token zeigt die App „bald“ und alles andere funktioniert normal.
+
+## Zwei-Faktor-Anmeldung
+Neue Konten müssen direkt nach der Registrierung eine Authenticator-App (TOTP) einrichten; Bestandskonten werden beim
+Login auf die Einrichtung hingewiesen. Wiederherstellungscodes (8 Stück, einmalig) ersetzen das Handy. Es gibt keinen
+Admin-Reset per Oberfläche – im Notfall `UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE email = '…'` in D1.
+
 ## R2 für Bilder (optional)
 Dashboard → R2 → aktivieren → Bucket `sammlerwert-uploads` → `[[r2_buckets]]`-Block in `wrangler.toml` einkommentieren → redeploy.
 

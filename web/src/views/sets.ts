@@ -5,7 +5,7 @@ import { state } from "../lib/store.ts";
 import { cardTile, empty, section } from "../components/ui.ts";
 
 export async function sets(): Promise<HTMLElement> {
-  const all = (await api.sets()).items;
+  const all = (await api.sets()).items.filter((s) => s.cardsLoaded > 0 || (s.cardCountOfficial ?? 0) > 0);
   const owned = state.user ? await ownedBySet() : new Map<string, Set<string>>();
   const groups = new Map<string, SetSummary[]>();
   for (const s of all) { const k = s.seriesName ?? "Weitere"; (groups.get(k) ?? groups.set(k, []).get(k)!).push(s); }

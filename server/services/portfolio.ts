@@ -1,11 +1,11 @@
 import type { SqlDb } from "../db/adapter.ts";
 import { bulkInsert, runBatches } from "../db/adapter.ts";
-import type { CollectionItem, Condition, GradingCompany, Insight, Language, PortfolioSummary, PriceQuote, Variant } from "../../shared/types.ts";
+import type { Collection, CollectionItem, Condition, GradingCompany, Insight, Language, PortfolioSummary, PriceQuote, Variant } from "../../shared/types.ts";
 import { CONDITION_MULT, GRADE_MULT, gradeMultiplier } from "../pricing/engine.ts";
 import { getCardSummaries, quotesFor } from "./catalog.ts";
 import { today } from "../db/index.ts";
 
-interface ItemRow { id: number; collection_id: number; card_id: string; language: string; variant: string; condition: string; grading_company: string | null; grade: number | null; cert_no: string | null; quantity: number; purchase_price_eur: number | null; purchased_at: string | null; notes: string | null; image_path: string | null; created_at: string }
+interface ItemRow { id: number; collection_id: number; card_id: string; language: string; variant: string; condition: string; grading_company: string | null; grade: number | null; cert_no: string | null; quantity: number; purchase_price_eur: number | null; purchased_at: string | null; notes: string | null; image_path: string | null; created_at: string; source?: string | null }
 
 export { GRADE_MULT };
 
@@ -21,6 +21,20 @@ export async function defaultCollectionId(db: SqlDb, userId: number): Promise<nu
   const row = await db.first<{ id: number }>("SELECT id FROM collections WHERE user_id = ? ORDER BY is_default DESC, id LIMIT 1", [userId]);
   if (row) return row.id;
   return (await db.run("INSERT INTO collections(user_id, name, is_default) VALUES (?, 'Meine Sammlung', 1)", [userId])).lastInsertRowid;
+}
+
+interface CollectionRow { id: number; name: string; is_default: number; description: string | null; color: string | null; share_token: string | null; sort_order: number; created_at: string; item_count: number; quantity: number }
+export async function listCollections(db: SqlDb, userId: number): Promise<Collection[]> {
+  await defaultCollectionId(db, userId);
+  return (await db.all<CollectionRow>(`SELECT c.*, (SELECT COUNT(*) FROM collection_items i WHERE i.collection_id = c.id) item_count, (SELECT COALESCE(SUM(quantity),0) FROM collection_items i WHERE i.collection_id = c.id) quantity
+    FROM collections c WHERE c.user_id = ? ORDER BY c.is_default DESC, c.sort_order, c.id`, [userId])).map((c) => ({
+    id: c.id, name: c.name, isDefault: !!c.is_default, description: c.description, color: c.color, shareToken: c.share_token, sortOrder: c.sort_order, createdAt: c.created_at, itemCount: c.item_count, quantity: c.quantity,
+  }));
+}
+
+export async function ownedCollection(db: SqlDb, userId: number, id: number): Promise<Collection | null> {
+  if (!Number.isInteger(id)) return null;
+  return (await listCollections(db, userId)).find((c) => c.id === id) ?? null;
 }
 
 export async function listItems(db: SqlDb, userId: number, collectionId?: number): Promise<CollectionItem[]> {
@@ -41,7 +55,7 @@ export async function hydrate(db: SqlDb, rows: ItemRow[]): Promise<CollectionIte
     return {
       id: r.id, collectionId: r.collection_id, cardId: r.card_id, language: r.language as Language, variant: r.variant as Variant, condition: r.condition as Condition,
       gradingCompany: r.grading_company as GradingCompany | null, grade: r.grade, certNo: r.cert_no, quantity: r.quantity, purchasePriceEur: r.purchase_price_eur,
-      purchasedAt: r.purchased_at, notes: r.notes, imagePath: r.image_path, createdAt: r.created_at, card, quote, currentValue: unitValue(quote, base),
+      purchasedAt: r.purchased_at, notes: r.notes, imagePath: r.image_path, createdAt: r.created_at, source: r.source ?? null, card, quote, currentValue: unitValue(quote, base),
     };
   });
 }

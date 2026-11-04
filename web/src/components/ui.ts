@@ -1,4 +1,4 @@
-import type { CardDetail, CardSummary, CollectionItem, PriceQuote } from "../../../shared/types.ts";
+import type { CardDetail, CardSummary, Collection, CollectionItem, PriceQuote } from "../../../shared/types.ts";
 import { h, svg, icons, fmt, label, cardImage, cardName, trendClass, toast, imgOr } from "../lib/dom.ts";
 import { api, HttpError, invalidate } from "../lib/api.ts";
 import { state } from "../lib/store.ts";
@@ -92,33 +92,73 @@ export function requireLogin(): boolean {
   return false;
 }
 
-/** Add-to-collection sheet. */
-export function addToCollection(card: CardDetail | CardSummary, existing?: CollectionItem): void {
+export interface AddOptions { collections?: Collection[]; collectionId?: number | null; source?: string; onSaved?: (item: CollectionItem) => void; prefill?: Partial<Pick<CollectionItem, "language" | "variant" | "condition" | "gradingCompany" | "grade" | "certNo">> }
+
+let collectionsCache: { at: number; items: Collection[] } | null = null;
+async function loadCollections(): Promise<Collection[]> {
+  if (collectionsCache && Date.now() - collectionsCache.at < 30_000) return collectionsCache.items;
+  try { const items = (await api.collections()).items; collectionsCache = { at: Date.now(), items }; return items; } catch { return []; }
+}
+export function forgetCollections() { collectionsCache = null; }
+
+/** Add-to-collection / edit sheet. No browser dialogs: deleting is a two-tap button inside the sheet. */
+export function addToCollection(card: CardDetail | CardSummary, existing?: CollectionItem, opts: AddOptions = {}): void {
   if (!requireLogin()) return;
   const variants = "variants" in card ? card.variants : {};
+  const pre = opts.prefill ?? {};
   const form = h("form", { class: "form" });
-  const lang = select("language", LANG_OPTIONS, existing?.language ?? "de");
-  const variant = select("variant", variantOptions(variants), existing?.variant ?? (variants.normal === false && variants.holo ? "holo" : "normal"));
-  const cond = select("condition", COND_OPTIONS, existing?.condition ?? "NM");
-  const grader = select("gradingCompany", GRADER_OPTIONS, existing?.gradingCompany ?? "");
-  const grade = h("input", { name: "grade", type: "number", step: "0.5", min: "1", max: "10", placeholder: "10", value: existing?.grade ?? "" });
-  const cert = h("input", { name: "certNo", placeholder: "Zertifikat-Nr.", value: existing?.certNo ?? "" });
-  const gradeRow = h("div", { class: "row", hidden: !existing?.gradingCompany }, field("Note", grade), field("Zertifikat", cert));
-  grader.addEventListener("change", () => (gradeRow.hidden = !grader.value));
-  const qty = h("input", { name: "quantity", type: "number", min: "1", max: "999", value: existing?.quantity ?? 1 });
+  const lang = select("language", LANG_OPTIONS, existing?.language ?? pre.language ?? "de");
+  const variant = select("variant", variantOptions(variants), existing?.variant ?? pre.variant ?? (variants.normal === false && variants.holo ? "holo" : "normal"));
+  const cond = select("condition", COND_OPTIONS, existing?.condition ?? pre.condition ?? "NM");
+  const grader = select("gradingCompany", GRADER_OPTIONS, existing?.gradingCompany ?? pre.gradingCompany ?? "");
+  const grade = h("input", { name: "grade", type: "number", step: "0.5", min: "1", max: "10", placeholder: "10", inputmode: "decimal", value: existing?.grade ?? pre.grade ?? "" });
+  const cert = h("input", { name: "certNo", placeholder: "Zertifikat-Nr.", inputmode: "numeric", value: existing?.certNo ?? pre.certNo ?? "" });
+  const psaBtn = h("button", { class: "btn ghost sm", type: "button", hidden: true, title: "Karte und Note bei PSA nachschlagen" }, svg(icons.shield, 14), " PSA prüfen");
+  const gradeRow = h("div", { class: "row", hidden: !(existing?.gradingCompany ?? pre.gradingCompany) }, field("Note", grade), field("Zertifikat", h("div", { class: "input-row" }, cert, psaBtn)));
+  const syncPsa = () => { psaBtn.hidden = grader.value !== "PSA"; };
+  grader.addEventListener("change", () => { gradeRow.hidden = !grader.value; syncPsa(); }); syncPsa();
+  psaBtn.addEventListener("click", async () => {
+    psaBtn.disabled = true;
+    try {
+      const r = await api.psaCert(cert.value);
+      if (r.cert.grade != null) grade.value = String(r.cert.grade);
+      const same = r.best && r.best.card.id === card.id;
+      toast(same ? `PSA bestätigt: ${r.cert.subject ?? ""} ${r.cert.gradeText ?? ""}` : r.best ? `PSA sagt: ${r.cert.subject ?? ""} (${r.cert.brand ?? ""}) – das sieht nach ${cardName(r.best.card)} #${r.best.card.localId} aus.` : `PSA: ${r.cert.subject ?? ""} ${r.cert.gradeText ?? ""}`);
+    } catch (e) { toast((e as Error).message, "error"); }
+    psaBtn.disabled = false;
+  });
+  const qty = h("input", { name: "quantity", type: "number", min: "1", max: "999", inputmode: "numeric", value: existing?.quantity ?? 1 });
   const price = h("input", { name: "purchasePriceEur", type: "number", step: "0.01", min: "0", inputmode: "decimal", placeholder: "0,00", value: existing?.purchasePriceEur ?? "" });
   const date = h("input", { name: "purchasedAt", type: "date", value: existing?.purchasedAt?.slice(0, 10) ?? "" });
   const notes = h("textarea", { name: "notes", rows: 2, placeholder: "Herkunft, Lagerort, Besonderheiten …", value: existing?.notes ?? "" });
+  const collSel = h("select", { name: "collectionId" }) as HTMLSelectElement;
+  const collField = field("Sammlung", collSel); collField.hidden = true;
   const submit = h("button", { class: "btn primary", type: "submit" }, existing ? "Speichern" : "Zur Sammlung hinzufügen");
+  const removeBtn = existing ? h("button", { class: "btn danger ghost", type: "button" }, svg(icons.trash, 16), " Entfernen") : null;
+  removeBtn?.addEventListener("click", () => {
+    const yes = h("button", { class: "btn danger", type: "button", onClick: async () => { try { await api.deleteItem(existing!.id); invalidate(); close(); toast("Entfernt."); document.dispatchEvent(new CustomEvent("collection:changed")); } catch (e) { toast((e as Error).message, "error"); } } }, "Ja, entfernen");
+    const no = h("button", { class: "btn ghost", type: "button", onClick: () => box.replaceWith(removeBtn!) }, "Abbrechen");
+    const box = h("span", { class: "confirm-inline" }, yes, no);
+    removeBtn!.replaceWith(box);
+  });
   form.append(
     h("div", { class: "card-mini" }, cardImage(card) ? h("img", { src: cardImage(card)!, alt: "" }) : null, h("div", null, h("strong", null, cardName(card)), h("div", { class: "muted" }, `#${card.localId} · ${card.setNameDe ?? card.setNameEn ?? ""}`))),
     h("div", { class: "row" }, field("Sprache", lang), field("Variante", variant)),
     h("div", { class: "row" }, field("Zustand", cond), field("Grading", grader)),
     gradeRow,
     h("div", { class: "row three" }, field("Anzahl", qty), field("Kaufpreis (Stück)", price), field("Gekauft am", date)),
+    collField,
     field("Notizen", notes),
-    h("div", { class: "actions" }, existing ? h("button", { class: "btn danger ghost", type: "button", onClick: async () => { if (!confirm("Karte aus der Sammlung entfernen?")) return; await api.deleteItem(existing.id); invalidate(); close(); toast("Entfernt."); document.dispatchEvent(new CustomEvent("collection:changed")); } }, svg(icons.trash, 16), " Entfernen") : null, submit),
+    h("div", { class: "actions" }, removeBtn, submit),
   );
+  (async () => {
+    const cols = opts.collections ?? (await loadCollections());
+    if (cols.length > 1) {
+      const cur = existing?.collectionId ?? opts.collectionId ?? cols.find((c) => c.isDefault)?.id ?? cols[0]!.id;
+      collSel.replaceChildren(...cols.map((c) => h("option", { value: String(c.id), selected: c.id === cur }, c.name)));
+      collField.hidden = false;
+    }
+  })();
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     submit.disabled = true;
@@ -126,12 +166,14 @@ export function addToCollection(card: CardDetail | CardSummary, existing?: Colle
       cardId: card.id, language: lang.value, variant: variant.value, condition: cond.value,
       gradingCompany: grader.value || null, grade: grader.value ? Number(grade.value) || null : null, certNo: cert.value || null,
       quantity: Number(qty.value) || 1, purchasePriceEur: price.value ? Number(price.value) : null, purchasedAt: date.value || null, notes: notes.value || null,
+      collectionId: collField.hidden ? (opts.collectionId ?? undefined) : Number(collSel.value), source: existing ? undefined : opts.source ?? "manual",
     };
     try {
-      if (existing) await api.updateItem(existing.id, body); else await api.addItem(body);
-      invalidate(); close();
+      const r = existing ? await api.updateItem(existing.id, body) : await api.addItem(body);
+      invalidate(); forgetCollections(); close();
       toast(existing ? "Gespeichert." : "Zur Sammlung hinzugefügt.");
       document.dispatchEvent(new CustomEvent("collection:changed"));
+      opts.onSaved?.(r.item);
     } catch (err) {
       submit.disabled = false;
       if (err instanceof HttpError && err.status === 402) { close(); upgradePrompt(err.message); } else toast((err as Error).message, "error");
