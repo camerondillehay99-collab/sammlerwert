@@ -225,6 +225,15 @@ CREATE TABLE IF NOT EXISTS job_runs (
   detail TEXT
 );
 
+-- Per-card bookkeeping for the eBay rotation (see server/ingest/ebay.ts dueCards).
+CREATE TABLE IF NOT EXISTS ebay_refresh (
+  card_id TEXT PRIMARY KEY REFERENCES cards(id),
+  last_at TEXT NOT NULL,
+  listings INTEGER NOT NULL DEFAULT 0,
+  sales INTEGER NOT NULL DEFAULT 0,
+  error TEXT
+);
+
 -- Code changes queued from the development workspace; `scripts/sync-from-d1.ts` (GitHub Actions) turns them into commits.
 -- One row per file chunk (gzip + base64, ≤ 60 kB so a row fits D1's statement limit); `deleted` removes the path.
 CREATE TABLE IF NOT EXISTS deploy_patches (

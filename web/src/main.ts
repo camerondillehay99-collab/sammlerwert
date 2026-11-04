@@ -6,7 +6,7 @@ import { search } from "./views/search.ts";
 import { cardView } from "./views/card.ts";
 import { collection } from "./views/collection.ts";
 import { sets, setView } from "./views/sets.ts";
-import { market, authView, settings, pricing, legal } from "./views/misc.ts";
+import { market, authView, settings, pricing, legal, methodik } from "./views/misc.ts";
 
 const BRAND = (document.querySelector('meta[name="application-name"]') as HTMLMetaElement | null)?.content ?? "Sammlerwert";
 document.documentElement.dataset.theme = state.theme;
@@ -22,6 +22,7 @@ route("/login", authView("login"), `Anmelden – ${BRAND}`);
 route("/registrieren", authView("register"), `Registrieren – ${BRAND}`);
 route("/einstellungen", settings, `Einstellungen – ${BRAND}`);
 route("/tarife", pricing, `Tarife – ${BRAND}`);
+route("/methodik", methodik, `Methodik – ${BRAND}`);
 route("/impressum", legal("impressum"), `Impressum – ${BRAND}`);
 route("/datenschutz", legal("datenschutz"), `Datenschutz – ${BRAND}`);
 
@@ -41,7 +42,7 @@ function shell(): HTMLElement {
   const sidebar = h("aside", { class: "sidebar" },
     h("a", { class: "brand", href: "/" }, h("span", { class: "brand-mark" }, "S"), h("span", null, h("strong", null, BRAND), h("small", null, "Deutsche Karten. Echte Preise."))),
     h("nav", { class: "nav" }, ...navLinks("nav-item")),
-    h("div", { class: "sidebar-foot" }, userBox(), h("p", { class: "foot-links" }, h("a", { href: "/tarife" }, "Tarife"), " · ", h("a", { href: "/impressum" }, "Impressum"), " · ", h("a", { href: "/datenschutz" }, "Datenschutz"))),
+    h("div", { class: "sidebar-foot" }, userBox(), h("p", { class: "foot-links" }, h("a", { href: "/tarife" }, "Tarife"), " · ", h("a", { href: "/methodik" }, "Methodik"), " · ", h("a", { href: "/impressum" }, "Impressum"), " · ", h("a", { href: "/datenschutz" }, "Datenschutz"))),
   );
   const mobile = h("nav", { class: "mobile-nav" }, ...navLinks("mnav-item"));
   const main = h("main", { class: "main", id: "outlet" });

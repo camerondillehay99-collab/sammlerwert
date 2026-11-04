@@ -83,6 +83,13 @@ export interface CardDetail extends CardSummary {
   guide: CardmarketGuidePoint | null;
   history: PricePoint[];
   sales: SaleRecord[];
+  /** value per grading company and grade, from real graded sales (method "sales") or estimated (method "multiplier") */
+  graded: GradedValue[];
+}
+
+export interface GradedValue {
+  company: string; grade: number; value: number; low: number | null; high: number | null;
+  n: number; n90: number; lastSoldAt: string | null; method: "sales" | "multiplier";
 }
 
 export interface CardmarketGuidePoint {

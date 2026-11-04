@@ -35,7 +35,8 @@ const CONDITIONS: readonly Condition[] = ["MT", "NM", "EX", "GD", "LP", "PL", "P
 const GRADERS: readonly GradingCompany[] = ["PSA", "BGS", "CGC", "GSG", "AP", "TAG", "ACE", "OTHER"];
 
 // ---------- meta ----------
-add("GET", "/api/health", async (_r, _p, db) => json({ ok: true, brand: config.brand.name, stats: await catalogStats(db), ebay: ebayConfigured(), billing: stripeConfigured(), uploads: !!blobStore() }));
+add("GET", "/api/health", async (_r, _p, db) => json({ ok: true, brand: config.brand.name, stats: await catalogStats(db), ebay: ebayConfigured(),
+  ebayInsights: (await db.first<{ value: string }>("SELECT value FROM meta WHERE key = 'ebay_insights'"))?.value ?? null, billing: stripeConfigured(), uploads: !!blobStore() }));
 
 // ---------- auth ----------
 add("POST", "/api/auth/register", async (req, _p, db) => {

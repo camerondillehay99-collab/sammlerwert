@@ -39,7 +39,7 @@ function build(card: CardDetail, update: (c: CardDetail) => void): HTMLElement[]
         h("span", { class: "eyebrow" }, "Marktwert Deutsch", primaryDe ? ` · ${label.variant(primaryDe.variant)}` : ""),
         h("div", { class: "price-big" }, h("strong", null, fmt.eur(primaryDe?.value)), primaryDe ? trendPill(primaryDe.trend30, " / 30 T.") : null),
         primaryDe ? h("div", { class: "price-sub" }, confidenceBadge(primaryDe.confidence), h("span", { class: "muted" }, primaryDe.low != null ? `Spanne ${fmt.eur(primaryDe.low)} – ${fmt.eur(primaryDe.high)}` : "")) : h("p", { class: "muted" }, card.cmProductId ? "Noch kein Marktwert berechnet." : "Diese Karte ist noch keinem Cardmarket-Produkt zugeordnet. Die Zuordnung läuft im Hintergrund."),
-        primaryDe ? h("p", { class: "method muted" }, `Basis: ${label.method(primaryDe.method)}${primaryDe.nSales90d ? ` · ${primaryDe.nSales90d} Verkäufe in 90 Tagen` : ""}`) : null),
+        primaryDe ? h("p", { class: "method muted" }, `Basis: ${label.method(primaryDe.method)}${primaryDe.nSales90d ? ` · ${primaryDe.nSales90d} Verkäufe in 90 Tagen` : ""} · `, h("a", { href: "/methodik" }, "Methodik")) : null),
       primaryEn && primaryEn.value != null && primaryDe && (primaryEn.value !== primaryDe.value || primaryEn.method !== primaryDe.method) ? h("div", { class: "price-compare" }, h("span", null, "Englisch"), h("b", null, fmt.eur(primaryEn.value)), primaryDe?.value && primaryEn.value ? h("span", { class: `trend ${primaryDe.value >= primaryEn.value ? "up" : "down"}` }, `Deutsch ${fmt.pct(primaryDe.value / primaryEn.value - 1)}`) : null) : null,
       card.guide ? h("div", { class: "guide" },
         h("div", { class: "guide-head" }, h("span", null, "Cardmarket-Preisguide"), h("small", { class: "muted" }, `alle Sprachen · ${fmt.date(card.guide.date)}`)),
@@ -60,12 +60,24 @@ function build(card: CardDetail, update: (c: CardDetail) => void): HTMLElement[]
 
   const quotes = section("Alle Bewertungen", card.prices.length ? h("div", { class: "quotes" }, ...[...de, ...en, ...others].map(quoteRow)) : h("p", { class: "muted" }, "Noch keine Bewertungen."));
 
-  const sales = section("Letzte Verkäufe", card.sales.length
+  const sales = section(`Letzte Verkäufe${card.sales.length ? ` (${card.sales.length})` : ""}`, card.sales.length
     ? h("table", { class: "table" }, h("thead", null, h("tr", null, h("th", null, "Datum"), h("th", null, "Preis"), h("th", null, "Sprache"), h("th", null, "Variante / Zustand"), h("th", null, "Quelle"))),
         h("tbody", null, ...card.sales.map((s) => h("tr", null, h("td", null, fmt.date(s.soldAt)), h("td", null, h("b", null, fmt.eur(s.priceEur))), h("td", null, label.language(s.language)),
           h("td", null, `${label.variant(s.variant)}${s.condition ? ` · ${label.condition(s.condition)}` : ""}${s.gradingCompany ? ` · ${s.gradingCompany} ${s.grade}` : ""}`),
           h("td", null, s.url ? h("a", { href: s.url, target: "_blank", rel: "noopener" }, sourceLabel(s.source), " ", svg(icons.external, 12)) : sourceLabel(s.source), s.verified ? h("span", { class: "chip ok", title: "verifiziert" }, "✓") : null)))))
-    : h("div", null, h("p", { class: "muted" }, "Noch keine Verkäufe für diese Karte erfasst. Sobald eBay.de-Verkaufsdaten angebunden sind, erscheinen sie hier automatisch."), h("button", { class: "btn ghost", onClick: () => reportSale(card, update) }, "Verkauf melden")));
+    : h("div", null, h("p", { class: "muted" }, "Noch keine Verkäufe für diese Karte erfasst. Verkäufe von eBay.de werden laufend eingelesen – wertvolle und beobachtete Karten zuerst."), h("button", { class: "btn ghost", onClick: () => reportSale(card, update) }, "Verkauf melden")));
+
+  const graded = section("Bewertete Karten (PSA · CGC · BGS)", card.graded.length
+    ? h("div", null,
+        h("table", { class: "table" }, h("thead", null, h("tr", null, h("th", null, "Grade"), h("th", null, "Wert"), h("th", null, "Spanne"), h("th", null, "Verkäufe"), h("th", null, "Letzter Verkauf"))),
+          h("tbody", null, ...card.graded.map((g) => h("tr", null,
+            h("td", null, h("b", null, `${g.company} ${g.grade}`)),
+            h("td", null, h("b", null, fmt.eur(g.value)), g.method === "multiplier" ? h("span", { class: "chip", title: "Keine Verkäufe dieser Bewertung erfasst – Schätzung aus dem Rohwert" }, "Schätzung") : null),
+            h("td", null, g.low != null ? `${fmt.eur(g.low)} – ${fmt.eur(g.high)}` : "–"),
+            h("td", null, g.method === "sales" ? `${g.n} (${g.n90} in 90 T.)` : "–"),
+            h("td", null, g.lastSoldAt ? fmt.date(g.lastSoldAt) : "–"))))),
+        h("p", { class: "muted small" }, "Werte mit Verkäufen: zeitgewichteter Median echter Verkäufe dieser Bewertung (180 Tage, Ausreißer entfernt). „Schätzung“ = Rohwert × typischer Aufschlag, bis Verkäufe vorliegen."))
+    : h("p", { class: "muted" }, "Noch keine Verkäufe bewerteter Exemplare erfasst."));
 
   const details = section("Details", h("dl", { class: "dl" },
     dd("Set", h("a", { href: `/sets/${encodeURIComponent(card.setId)}` }, card.setNameDe ?? card.setNameEn ?? card.setId)), dd("Nummer", card.localId), dd("Seltenheit", card.rarity ?? "–"),
@@ -73,7 +85,7 @@ function build(card: CardDetail, update: (c: CardDetail) => void): HTMLElement[]
     dd("Illustrator", card.illustrator ?? "–"), dd("Varianten", Object.entries(card.variants).filter(([, v]) => v).map(([k]) => label.variant(k)).join(", ") || "–"),
     dd("Cardmarket-Zuordnung", card.cmProductId ? `${card.cmMatchMethod === "tcgdex" ? "exakt" : "per Name"} (#${card.cmProductId})` : "offen"), dd("Katalog-ID", card.id)));
 
-  return [head, hero, chart, h("div", { class: "grid-2" }, quotes, details), sales];
+  return [head, hero, chart, h("div", { class: "grid-2" }, quotes, details), graded, sales];
 }
 
 function gv(lbl: string, v: number | null): HTMLElement | null { return v == null ? null : h("div", null, h("span", null, lbl), h("b", null, fmt.eur(v))); }

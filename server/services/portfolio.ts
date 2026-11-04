@@ -1,26 +1,18 @@
 import type { SqlDb } from "../db/adapter.ts";
 import { bulkInsert, runBatches } from "../db/adapter.ts";
 import type { CollectionItem, Condition, GradingCompany, Insight, Language, PortfolioSummary, PriceQuote, Variant } from "../../shared/types.ts";
-import { CONDITION_MULT } from "../pricing/engine.ts";
+import { CONDITION_MULT, GRADE_MULT, gradeMultiplier } from "../pricing/engine.ts";
 import { getCardSummaries, quotesFor } from "./catalog.ts";
 import { today } from "../db/index.ts";
 
 interface ItemRow { id: number; collection_id: number; card_id: string; language: string; variant: string; condition: string; grading_company: string | null; grade: number | null; cert_no: string | null; quantity: number; purchase_price_eur: number | null; purchased_at: string | null; notes: string | null; image_path: string | null; created_at: string }
 
-/** Graded cards: multiplier over NM raw value. Conservative defaults until we have graded sales per card. */
-export const GRADE_MULT: Record<string, Record<string, number>> = {
-  PSA: { "10": 3.0, "9": 1.5, "8": 1.1, "7": 0.95 },
-  BGS: { "10": 4.5, "9.5": 2.6, "9": 1.4, "8.5": 1.05 },
-  CGC: { "10": 2.8, "9.5": 1.7, "9": 1.3 },
-  default: { "10": 2.5, "9.5": 1.6, "9": 1.3, "8": 1.05 },
-};
+export { GRADE_MULT };
 
 export function unitValue(q: PriceQuote | null, item: { condition: string; gradingCompany: string | null; grade: number | null }): number | null {
   if (!q?.value) return null;
   if (item.gradingCompany && item.grade != null) {
-    const table = GRADE_MULT[item.gradingCompany] ?? GRADE_MULT.default!;
-    const mult = table[String(item.grade)] ?? GRADE_MULT.default![String(item.grade)] ?? 1;
-    return Math.round(q.value * mult * 100) / 100;
+    return Math.round(q.value * gradeMultiplier(item.gradingCompany, item.grade) * 100) / 100;
   }
   return Math.round(q.value * (CONDITION_MULT[item.condition] ?? 0.95) * 100) / 100;
 }

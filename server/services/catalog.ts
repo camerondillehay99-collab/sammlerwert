@@ -1,3 +1,4 @@
+import { gradedValues } from "../pricing/engine.ts";
 import type { SqlDb } from "../db/adapter.ts";
 import { chunks, placeholders } from "../db/adapter.ts";
 import type { CardDetail, CardSummary, CardmarketGuidePoint, Language, PriceQuote, SaleRecord, SetSummary, Variant } from "../../shared/types.ts";
@@ -101,12 +102,15 @@ export async function getCardDetail(db: SqlDb, id: string): Promise<CardDetail |
   const guide: CardmarketGuidePoint | null = g ? { date: g.date, avg: g.avg, low: g.low, trend: g.trend, avg1: g.avg1, avg7: g.avg7, avg30: g.avg30,
     foilAvg: g.foil_avg, foilLow: g.foil_low, foilTrend: g.foil_trend, foilAvg1: g.foil_avg1, foilAvg7: g.foil_avg7, foilAvg30: g.foil_avg30 } : null;
   const base = rowToSummary(row, quotes);
+  const sales = await getSales(db, id, 100);
+  const raw = quotes.get(`${id}|de|*`)?.value ?? quotes.get(`${id}|en|*`)?.value ?? null;
+  const graded = gradedValues(sales.filter((s) => s.gradingCompany && s.grade != null).map((s) => ({ price: s.priceEur, soldAt: s.soldAt, company: s.gradingCompany!, grade: s.grade!, verified: s.verified })), raw);
   return {
     ...base,
     hp: extra.hp, types: jsonOr(extra.types, []), dexIds: jsonOr(extra.dex_ids, []), illustrator: extra.illustrator, variants: jsonOr(row.variants, {}),
     cmProductId: row.cm_product_id, cmMatchMethod: extra.cm_match_method, cmMatchConfidence: extra.cm_match_confidence,
     cmUrl: row.cm_product_id != null ? cardmarketSearchUrl(base.nameEn ?? base.nameDe ?? "") : null,
-    prices, guide, history: await cardHistory(db, row), sales: await getSales(db, id, 50),
+    prices, guide, history: await cardHistory(db, row), sales, graded,
   };
 }
 

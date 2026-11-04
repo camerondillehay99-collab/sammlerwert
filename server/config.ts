@@ -40,8 +40,8 @@ export function buildConfig(e: EnvMap) {
       clientSecret: env("EBAY_CLIENT_SECRET"),
       marketplace: env("EBAY_MARKETPLACE", "EBAY_DE"),
       env: env("EBAY_ENV", "production") as "production" | "sandbox",
-      insightsEnabled: bool(e.EBAY_INSIGHTS_ENABLED, false),
-      maxCardsPerRun: Number(env("EBAY_MAX_CARDS_PER_RUN", "400")),
+      insightsEnabled: e.EBAY_INSIGHTS_ENABLED == null ? null : bool(e.EBAY_INSIGHTS_ENABLED, true),
+      maxCardsPerRun: Number(env("EBAY_MAX_CARDS_PER_RUN", "700")),
     },
     stripe: {
       secretKey: env("STRIPE_SECRET_KEY"),

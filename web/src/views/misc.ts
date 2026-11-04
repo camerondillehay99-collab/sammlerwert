@@ -109,3 +109,30 @@ export async function pricing(): Promise<HTMLElement> {
     ),
     h("p", { class: "muted center small" }, "Händler-/API-Zugang auf Anfrage."));
 }
+
+/** Transparency page: how a Sammlerwert market value is built. Trust comes from showing the recipe. */
+export function methodik(): HTMLElement {
+  const p = (...c: (string | HTMLElement)[]) => h("p", null, ...c);
+  return h("div", { class: "page narrow" },
+    h("header", { class: "page-head" }, h("div", null, h("p", { class: "eyebrow" }, "Transparenz"), h("h1", null, "So entsteht ein Sammlerwert"),
+      h("p", { class: "muted" }, "Kein Wunschpreis, keine Schätzung ins Blaue: Jeder Marktwert ist aus echten Verkäufen und dem Cardmarket-Preisguide nachvollziehbar aufgebaut – und jeder Verkauf, der einfließt, steht sichtbar auf der Kartenseite."))),
+    section("1 · Datenquellen",
+      h("div", { class: "form" },
+        p(h("b", null, "Verkäufe auf eBay.de"), " – abgeschlossene Verkäufe der letzten 90 Tage über die offizielle eBay-Schnittstelle. Jede Anzeige wird automatisch gelesen: Kartenname und Nummer müssen passen, Sprache (deutsch/englisch/japanisch), Variante (Holo, Reverse, 1. Edition), Bewertung (PSA, CGC, BGS …) werden erkannt; Lots, Proxys, Metallkarten und Codes fliegen raus."),
+        p(h("b", null, "Cardmarket-Preisguide"), " – der tägliche Preisguide (Trend, Ø 1/7/30 Tage, Ab-Preis) als Anker. Er mischt alle Sprachen, deshalb lernt Sammlerwert pro Set einen ", h("i", null, "Sprachfaktor"), " aus den deutschen Verkäufen: Verkaufspreis ÷ Guide-Trend, Median über das Set, gegen den globalen Faktor abgesichert."),
+        p(h("b", null, "Aktive Angebote"), " – die günstigsten deutschen Angebote bei eBay.de dienen nur als Untergrenze. Sie dürfen den Wert nie dominieren (maximal 25 % Gewicht)."),
+        p(h("b", null, "Community-Meldungen"), " – von Nutzern gemeldete Verkäufe zählen mit halbem Gewicht, bis sie geprüft sind."))),
+    section("2 · Rechenweg",
+      h("div", { class: "form" },
+        p("Alle Verkäufe werden auf Near Mint normiert (EX ≈ 85 %, GD ≈ 70 % …) und zeitlich gewichtet: ein Verkauf verliert alle 21 Tage die Hälfte seines Gewichts. Ausreißer (mehr als 3 MAD vom Median) werden entfernt."),
+        p("Der Marktwert ist der gewichtete Median der Verkäufe, gemischt mit dem sprachbereinigten Guide-Wert. Je mehr aktuelle Verkäufe, desto mehr zählen sie: bei drei effektiven Verkäufen halbe-halbe, ab etwa zehn fast nur noch Verkäufe."),
+        p("Bewertete Karten (PSA 10, CGC 9.5 …) werden Grade für Grade aus ihren eigenen Verkäufen berechnet (180 Tage, langsamere Abwertung). Fehlen Verkäufe, wird ehrlich „Schätzung“ angezeigt."))),
+    section("3 · Konfidenz",
+      h("div", { class: "form" },
+        p(h("b", null, "Hoch"), " – mehrere aktuelle Verkäufe, die mit dem Guide übereinstimmen. ", h("b", null, "Mittel"), " – Guide-Wert mit gelerntem Sprachfaktor oder wenige Verkäufe. ", h("b", null, "Niedrig"), " – nur Guide ohne deutschen Faktor, oder nur Angebote."),
+        p("Die Spanne (unteres bis oberes Quartil der Verkäufe) zeigt, was realistisch gezahlt wird – nicht nur einen Punkt."))),
+    section("4 · Was Sammlerwert nicht tut",
+      h("div", { class: "form" },
+        p("Keine Preise aus Angeboten als „Wert“ verkaufen. Keine Verkäufe verstecken. Keine Zahlen ohne Quelle. Wenn eine Karte zu wenig Daten hat, steht das dort – statt einer erfundenen Zahl."),
+        h("p", { class: "muted small" }, "Datenstand und Quellenanteile stehen bei jeder Bewertung. Fehler gefunden? Melde den Verkauf oder schreib uns – jede Meldung macht die Datenbasis für alle besser."))));
+}

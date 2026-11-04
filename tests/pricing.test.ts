@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { computeQuote, learnFactor, normalizeToNm, decayWeight, primaryVariant } from "../server/pricing/engine.ts";
+import { computeQuote, learnFactor, normalizeToNm, decayWeight, primaryVariant, gradedValues } from "../server/pricing/engine.ts";
 import { trimOutliers, weightedMedian, weightedQuantile } from "../server/pricing/stats.ts";
 
 const NOW = "2026-11-04T12:00:00Z";
@@ -102,5 +102,29 @@ describe("learnFactor", () => {
   });
   test("ignores absurd ratios", () => {
     expect(learnFactor([0.01, 50, 1.2], 1).n).toBe(1);
+  });
+});
+
+describe("gradedValues", () => {
+  const now = "2026-11-04T00:00:00Z";
+  const sale = (price: number, daysAgo: number, company = "PSA", grade = 10, verified = true) =>
+    ({ price, soldAt: new Date(Date.parse(now) - daysAgo * 86_400_000).toISOString(), company, grade, verified });
+  test("values a grade from its own sales, trims outliers, estimates missing PSA grades", () => {
+    const sales = [sale(300, 2), sale(320, 10), sale(290, 20), sale(3000, 5), sale(150, 3, "PSA", 9), sale(160, 30, "PSA", 9), sale(500, 1, "BGS", 9.5)];
+    const out = gradedValues(sales, 100, now);
+    const psa10 = out.find((g) => g.company === "PSA" && g.grade === 10)!;
+    expect(psa10.method).toBe("sales"); expect(psa10.n).toBe(4);
+    expect(psa10.value).toBeGreaterThan(280); expect(psa10.value).toBeLessThan(330); // the 3000 € outlier is trimmed
+    const psa9 = out.find((g) => g.company === "PSA" && g.grade === 9)!;
+    expect(psa9.method).toBe("sales"); expect(psa9.n).toBe(2);
+    expect(out.find((g) => g.company === "BGS")).toBeUndefined(); // a single sale is not a value
+    expect(out[0]!.company).toBe("PSA"); expect(out[0]!.grade).toBe(10); // sorted PSA first, highest grade first
+  });
+  test("multiplier estimates only when no sales exist and the raw value is meaningful", () => {
+    const est = gradedValues([], 40, now);
+    expect(est.map((g) => `${g.company} ${g.grade} ${g.method}`)).toEqual(["PSA 10 multiplier", "PSA 9 multiplier"]);
+    expect(est[0]!.value).toBeCloseTo(120, 5);
+    expect(gradedValues([], 2, now)).toEqual([]);
+    expect(gradedValues([sale(50, 400), sale(55, 390)], null, now)).toEqual([]); // too old
   });
 });

@@ -148,6 +148,68 @@ export function computeQuote(input: QuoteInput): PriceQuote {
   };
 }
 
+// ---------------------------------------------------------------------------------------------
+// Graded cards (PSA / BGS / CGC …): valued from their own sales, grade by grade – the same way the
+// US tools do it – and only estimated from the raw value (multiplier) when no graded sale exists.
+// ---------------------------------------------------------------------------------------------
+export const GRADE_MULT: Record<string, Record<string, number>> = {
+  PSA: { "10": 3.0, "9": 1.5, "8": 1.1, "7": 0.95 },
+  BGS: { "10": 4.5, "9.5": 2.6, "9": 1.4, "8.5": 1.05 },
+  CGC: { "10": 2.8, "9.5": 1.7, "9": 1.3 },
+  default: { "10": 2.5, "9.5": 1.6, "9": 1.3, "8": 1.05 },
+};
+const GRADED_HALF_LIFE_DAYS = 45; // graded cards trade less often; decay slower than raw
+
+export interface GradedSaleInput { price: number; soldAt: string; company: string; grade: number; verified: boolean }
+export interface GradedValue {
+  company: string; grade: number; value: number; low: number | null; high: number | null;
+  n: number; n90: number; lastSoldAt: string | null; method: "sales" | "multiplier";
+}
+
+export function gradeMultiplier(company: string, grade: number): number {
+  const table = GRADE_MULT[company] ?? GRADE_MULT.default!;
+  return table[String(grade)] ?? GRADE_MULT.default![String(grade)] ?? 1;
+}
+
+/**
+ * One value per (company, grade) that has ≥ 2 sales in the last 180 days: time-decayed weighted median after
+ * outlier trimming, with the inter-quartile range as spread. Grades without sales get a multiplier estimate
+ * from the raw NM value (PSA 10 / PSA 9 only, so the list stays honest and short).
+ */
+export function gradedValues(sales: GradedSaleInput[], rawValue: number | null, now = nowIso()): GradedValue[] {
+  const nowMs = new Date(now).getTime();
+  const age = (iso: string) => (nowMs - new Date(iso).getTime()) / 86_400_000;
+  const groups = new Map<string, GradedSaleInput[]>();
+  for (const s of sales) {
+    if (!(s.price > 0) || !s.company || !(s.grade > 0) || age(s.soldAt) > 180) continue;
+    const k = `${s.company}|${s.grade}`;
+    (groups.get(k) ?? groups.set(k, []).get(k)!).push(s);
+  }
+  const out: GradedValue[] = [];
+  for (const [k, g] of groups) {
+    if (g.length < 2) continue;
+    const pts: WPoint[] = g.map((s) => ({ v: s.price, w: Math.pow(0.5, age(s.soldAt) / GRADED_HALF_LIFE_DAYS) * (s.verified ? 1 : 0.5) }));
+    const trimmed = trimOutliers(pts);
+    const value = weightedMedian(trimmed);
+    if (value == null) continue;
+    const [company, grade] = k.split("|") as [string, string];
+    out.push({
+      company, grade: Number(grade), value: round2(value)!,
+      low: trimmed.length >= 3 ? round2(weightedQuantile(trimmed, 0.25)) : null, high: trimmed.length >= 3 ? round2(weightedQuantile(trimmed, 0.75)) : null,
+      n: g.length, n90: g.filter((s) => age(s.soldAt) <= 90).length,
+      lastSoldAt: g.map((s) => s.soldAt).sort().at(-1) ?? null, method: "sales",
+    });
+  }
+  if (rawValue != null && rawValue >= 5) {
+    for (const grade of [10, 9]) {
+      if (out.some((v) => v.company === "PSA" && v.grade === grade)) continue;
+      out.push({ company: "PSA", grade, value: round2(rawValue * gradeMultiplier("PSA", grade))!, low: null, high: null, n: 0, n90: 0, lastSoldAt: null, method: "multiplier" });
+    }
+  }
+  const rank: Record<string, number> = { PSA: 0, CGC: 1, BGS: 2 };
+  return out.sort((a, b) => (rank[a.company] ?? 9) - (rank[b.company] ?? 9) || b.grade - a.grade);
+}
+
 /** Learn language factor = median(sale_NM / guide_anchor), shrunk toward `global`. */
 export function learnFactor(ratios: number[], global: number): { value: number; n: number } {
   const clean = ratios.filter((r) => Number.isFinite(r) && r > 0.1 && r < 10);

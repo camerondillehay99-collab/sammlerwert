@@ -34,6 +34,9 @@ const weekday = new Date().getUTCDay();
 const t0 = Date.now();
 
 try {
+  // Tables added after the first deploy (schema.sql is the source of truth; these are cheap no-ops once they exist).
+  await db.exec(`CREATE TABLE IF NOT EXISTS ebay_refresh (card_id TEXT PRIMARY KEY REFERENCES cards(id), last_at TEXT NOT NULL, listings INTEGER NOT NULL DEFAULT 0, sales INTEGER NOT NULL DEFAULT 0, error TEXT);
+CREATE TABLE IF NOT EXISTS deploy_patches (id INTEGER PRIMARY KEY AUTOINCREMENT, batch TEXT NOT NULL, path TEXT NOT NULL, seq INTEGER NOT NULL DEFAULT 0, content TEXT, deleted INTEGER NOT NULL DEFAULT 0, message TEXT, created_at TEXT NOT NULL, applied_at TEXT);`);
   log(`Start. Stand: ${JSON.stringify(await catalogStats(db))}`);
 
   // Bootstrap: right after the first deploy only the catalogue is seeded (write budget). Build the search index first
