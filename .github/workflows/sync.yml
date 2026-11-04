@@ -29,10 +29,10 @@ jobs:
           git config user.name "Sammlerwert Sync"
           git config user.email "sync@users.noreply.github.com"
           git add -A -- ':!.sync-state.json'
-          git commit -F "$RUNNER_TEMP/sync-message.txt"
-          git push
+          if git diff --cached --quiet; then echo "Keine Änderung gegenüber main – nichts zu committen."; else git commit -F "$RUNNER_TEMP/sync-message.txt" && git push; fi
       - name: Mark changes as applied
         if: steps.apply.outputs.changed == 'true'
+        continue-on-error: true   # D1's daily write budget may be exhausted; rows are then re-applied (idempotent) on the next run
         run: bun run scripts/sync-from-d1.ts mark
       - name: Trigger deploy
         if: steps.apply.outputs.changed == 'true'
