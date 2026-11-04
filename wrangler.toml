@@ -1,0 +1,31 @@
+# Sammlerwert on Cloudflare – FREE tier design:
+#   Workers (serve-only) + D1 (data) + Static Assets (SPA). Heavy work runs in GitHub Actions (see .github/workflows/nightly.yml).
+name = "sammlerwert"
+main = "worker/index.ts"
+compatibility_date = "2026-10-13"
+workers_dev = true
+upload_source_maps = true
+
+[assets]
+directory = "./web/public"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/uploads/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sammlerwert"
+database_id = "08e0e704-3b2c-4884-9318-1b0a249ee37c"
+
+# R2 (10 GB free): enable R2 once in the dashboard, create bucket "sammlerwert-uploads", then uncomment:
+# [[r2_buckets]]
+# binding = "UPLOADS"
+# bucket_name = "sammlerwert-uploads"
+
+[vars]
+BRAND_NAME = "Sammlerwert"
+BRAND_TAGLINE = "Der Marktwert deiner deutschen Pokémon-Karten."
+PUBLIC_URL = "https://sammlerwert.REPLACE-ME.workers.dev"   # set to the URL wrangler prints after the first deploy (Stripe redirects)
+ADMIN_EMAILS = "camerondillehay99@gmail.com"
+# Secrets: npx wrangler secret put STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET / STRIPE_PRICE_SAMMLER / STRIPE_PRICE_PRO
+# (eBay keys belong to the GitHub Actions job, not the Worker.)

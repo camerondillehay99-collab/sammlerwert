@@ -1,0 +1,25 @@
+{
+  "name": "sammlerwert",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Sammlerwert – Portfolio, Preise und Verkaufsdaten für deutsche Pokémon-Karten.",
+  "scripts": {
+    "dev": "bun run --watch server/index.ts",
+    "start": "NODE_ENV=production bun run server/index.ts",
+    "build:web": "bun run scripts/build-web.ts",
+    "ingest": "bun run scripts/ingest.ts",
+    "ingest:fetch": "bun run scripts/ingest.ts --fetch",
+    "reprice": "bun run scripts/reprice.ts",
+    "seed:demo": "bun run scripts/seed-demo.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "deploy": "wrangler deploy",
+    "dev:cf": "wrangler dev",
+    "seed:d1": "bun run scripts/export-d1-seed.ts"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "license": "UNLICENSED"
+}

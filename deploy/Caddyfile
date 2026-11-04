@@ -1,0 +1,9 @@
+# Ersetze die Domain. Caddy besorgt automatisch Let's-Encrypt-Zertifikate.
+sammlerwert.de, www.sammlerwert.de {
+  encode zstd gzip
+  reverse_proxy app:4180
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    -Server
+  }
+}

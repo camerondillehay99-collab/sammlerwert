@@ -1,0 +1,21 @@
+{
+  "name": "Sammlerwert – Deutsche Pokémon-Karten",
+  "short_name": "Sammlerwert",
+  "description": "Portfolio, Marktwerte und Verkaufsdaten für deutsche Pokémon-Karten.",
+  "lang": "de-DE",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0e0f14",
+  "theme_color": "#f28c28",
+  "categories": ["finance", "lifestyle", "utilities"],
+  "icons": [
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Karte suchen", "url": "/suche" },
+    { "name": "Meine Sammlung", "url": "/sammlung" }
+  ]
+}

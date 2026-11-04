@@ -1,0 +1,32 @@
+name: Nightly data refresh
+on:
+  schedule:
+    - cron: "15 4 * * *"      # 04:15 UTC – Cardmarket's guide is published around 02:00 CET
+  workflow_dispatch:
+    inputs:
+      steps:
+        description: "Schritte (details,catalog,guide,ebay,factors)"
+        default: "details,catalog,guide,ebay,factors"
+      force_catalog:
+        description: "Katalog-Refresh erzwingen (sonst nur montags)"
+        default: "0"
+concurrency: nightly
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - name: Daten aktualisieren
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
+          EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+          EBAY_INSIGHTS_ENABLED: ${{ vars.EBAY_INSIGHTS_ENABLED }}
+          STEPS: ${{ github.event.inputs.steps }}
+          FORCE_CATALOG: ${{ github.event.inputs.force_catalog }}
+          DETAIL_BATCH: ${{ vars.DETAIL_BATCH }}
+        run: bun run scripts/nightly.ts

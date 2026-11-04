@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "node"
+    ],
+    "typeRoots": [
+      "/opt/npm-tools/node_modules/@types"
+    ]
+  },
+  "include": [
+    "types/bun-shim.d.ts",
+    "server",
+    "shared",
+    "web/src",
+    "scripts",
+    "tests",
+    "worker"
+  ]
+}

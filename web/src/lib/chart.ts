@@ -1,0 +1,82 @@
+// Lightweight SVG charts: line chart with multiple series, sparkline, donut. Theme colours via CSS variables.
+import type { PricePoint } from "../../../shared/types.ts";
+
+const NS = "http://www.w3.org/2000/svg";
+function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number> = {}): SVGElementTagNameMap[K] {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
+  return e;
+}
+
+export interface Series { name: string; points: PricePoint[]; color: string; dashed?: boolean }
+
+export function lineChart(series: Series[], opts: { height?: number; formatY?: (n: number) => string; emptyText?: string } = {}): SVGSVGElement {
+  const W = 640, H = opts.height ?? 240, padL = 56, padR = 12, padT = 12, padB = 28;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img" });
+  const all = series.flatMap((s) => s.points);
+  if (all.length < 2 || new Set(all.map((p) => p.date)).size < 2) {
+    const t = el("text", { x: W / 2, y: H / 2, "text-anchor": "middle", class: "chart-empty" });
+    t.textContent = opts.emptyText ?? "Noch zu wenige Datenpunkte – die Historie wächst täglich.";
+    svg.appendChild(t);
+    return svg;
+  }
+  const xs = all.map((p) => new Date(p.date).getTime()), ys = all.map((p) => p.value);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  let y0 = Math.min(...ys), y1 = Math.max(...ys);
+  if (y0 === y1) { y0 *= 0.9; y1 *= 1.1; }
+  const yPad = (y1 - y0) * 0.1; y0 = Math.max(0, y0 - yPad); y1 += yPad;
+  const X = (t: number) => padL + ((t - x0) / Math.max(1, x1 - x0)) * (W - padL - padR);
+  const Y = (v: number) => padT + (1 - (v - y0) / (y1 - y0)) * (H - padT - padB);
+  const fy = opts.formatY ?? ((n: number) => n.toFixed(0));
+
+  for (let i = 0; i <= 4; i++) {
+    const v = y0 + ((y1 - y0) * i) / 4, y = Y(v);
+    svg.appendChild(el("line", { x1: padL, x2: W - padR, y1: y, y2: y, class: "chart-grid" }));
+    const t = el("text", { x: padL - 8, y: y + 4, "text-anchor": "end", class: "chart-label" }); t.textContent = fy(v); svg.appendChild(t);
+  }
+  const ticks = 4;
+  for (let i = 0; i <= ticks; i++) {
+    const tms = x0 + ((x1 - x0) * i) / ticks;
+    const t = el("text", { x: X(tms), y: H - 8, "text-anchor": i === 0 ? "start" : i === ticks ? "end" : "middle", class: "chart-label" });
+    t.textContent = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "short" }).format(new Date(tms)); svg.appendChild(t);
+  }
+  series.forEach((s, idx) => {
+    const pts = [...s.points].sort((a, b) => a.date.localeCompare(b.date));
+    if (pts.length < 1) return;
+    const d = pts.map((p, i) => `${i ? "L" : "M"}${X(new Date(p.date).getTime()).toFixed(1)},${Y(p.value).toFixed(1)}`).join(" ");
+    if (idx === 0 && pts.length > 1) {
+      const area = el("path", { d: `${d} L${X(new Date(pts[pts.length - 1]!.date).getTime()).toFixed(1)},${Y(y0)} L${X(new Date(pts[0]!.date).getTime()).toFixed(1)},${Y(y0)} Z`, fill: s.color, opacity: 0.08 });
+      svg.appendChild(area);
+    }
+    svg.appendChild(el("path", { d, fill: "none", stroke: s.color, "stroke-width": 2.2, "stroke-dasharray": s.dashed ? "5 5" : "", "stroke-linejoin": "round", "stroke-linecap": "round" }));
+    const last = pts[pts.length - 1]!;
+    svg.appendChild(el("circle", { cx: X(new Date(last.date).getTime()), cy: Y(last.value), r: 3.5, fill: s.color }));
+    if (pts.length === 1) svg.appendChild(el("circle", { cx: X(new Date(last.date).getTime()), cy: Y(last.value), r: 6, fill: s.color, opacity: 0.25 }));
+  });
+  return svg;
+}
+
+export function sparkline(points: PricePoint[], color = "currentColor", w = 96, hgt = 28): SVGSVGElement {
+  const svg = el("svg", { viewBox: `0 0 ${w} ${hgt}`, width: w, height: hgt, class: "spark" });
+  if (points.length < 2) return svg;
+  const ys = points.map((p) => p.value), y0 = Math.min(...ys), y1 = Math.max(...ys) || 1;
+  const d = points.map((p, i) => `${i ? "L" : "M"}${((i / (points.length - 1)) * (w - 2) + 1).toFixed(1)},${(hgt - 2 - ((p.value - y0) / Math.max(1e-9, y1 - y0)) * (hgt - 4)).toFixed(1)}`).join(" ");
+  svg.appendChild(el("path", { d, fill: "none", stroke: color, "stroke-width": 1.8, "stroke-linejoin": "round" }));
+  return svg;
+}
+
+export function donut(parts: Array<{ value: number; color: string; label: string }>, size = 120): SVGSVGElement {
+  const svg = el("svg", { viewBox: "0 0 42 42", width: size, height: size, class: "donut" });
+  const total = parts.reduce((s, p) => s + p.value, 0) || 1;
+  let offset = 25;
+  for (const p of parts) {
+    const pct = (p.value / total) * 100;
+    const c = el("circle", { cx: 21, cy: 21, r: 15.9, fill: "transparent", stroke: p.color, "stroke-width": 5, "stroke-dasharray": `${pct} ${100 - pct}`, "stroke-dashoffset": offset });
+    const t = el("title"); t.textContent = `${p.label}: ${pct.toFixed(0)} %`; c.appendChild(t);
+    svg.appendChild(c);
+    offset -= pct;
+  }
+  return svg;
+}
+
+export const palette = ["var(--c-brand)", "var(--c-blue)", "var(--c-violet)", "var(--c-teal)", "var(--c-amber)", "var(--c-pink)", "var(--c-muted)"];

@@ -1,0 +1,31 @@
+name: Deploy to Cloudflare
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - run: bun test
+      - run: bun run scripts/build-web.ts
+      - name: Seed catalogue into D1 (first deploy only)
+        run: |
+          COUNT=$(npx --yes wrangler@4 d1 execute sammlerwert --remote --json --command "SELECT COUNT(*) AS n FROM cards" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);console.log(j[0].results[0].n)})")
+          echo "Karten in D1: $COUNT"
+          if [ "$COUNT" = "0" ] && [ -f deploy/d1-seed-part1.sql ]; then
+            echo "Seed Teil 1 (Katalog) …"
+            npx --yes wrangler@4 d1 execute sammlerwert --remote --yes --file=deploy/d1-seed-part1.sql
+          fi
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
