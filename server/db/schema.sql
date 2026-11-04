@@ -224,3 +224,17 @@ CREATE TABLE IF NOT EXISTS job_runs (
   status TEXT NOT NULL,
   detail TEXT
 );
+
+-- Code changes queued from the development workspace; `scripts/sync-from-d1.ts` (GitHub Actions) turns them into commits.
+-- One row per file chunk (gzip + base64, ≤ 60 kB so a row fits D1's statement limit); `deleted` removes the path.
+CREATE TABLE IF NOT EXISTS deploy_patches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch TEXT NOT NULL,
+  path TEXT NOT NULL,
+  seq INTEGER NOT NULL DEFAULT 0,
+  content TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  message TEXT,
+  created_at TEXT NOT NULL,
+  applied_at TEXT
+);

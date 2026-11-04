@@ -112,7 +112,15 @@ export function cardImage(card: Pick<CardSummary, "image" | "imageEn">, quality:
 export function imgOr(src: string | null, fallback: () => HTMLElement, attrs: Record<string, unknown> = {}): HTMLElement {
   if (!src) return fallback();
   const img = h("img", { src, alt: "", loading: "lazy", decoding: "async", ...attrs });
-  img.addEventListener("error", () => img.replaceWith(fallback()), { once: true });
+  // CDN hiccups and blockers are the usual cause of a failed scan: retry once after a pause, then try the PNG
+  // rendition, and only then show the placeholder.
+  let attempt = 0;
+  img.addEventListener("error", () => {
+    attempt++;
+    if (attempt === 1) setTimeout(() => { img.src = `${src}?r=1`; }, 1500);
+    else if (attempt === 2 && src.endsWith(".webp")) img.src = src.replace(/\.webp$/, ".png");
+    else img.replaceWith(fallback());
+  });
   return img;
 }
 

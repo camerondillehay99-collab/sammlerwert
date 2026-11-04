@@ -25,7 +25,7 @@ database_id = "08e0e704-3b2c-4884-9318-1b0a249ee37c"
 [vars]
 BRAND_NAME = "Sammlerwert"
 BRAND_TAGLINE = "Der Marktwert deiner deutschen Pokémon-Karten."
-PUBLIC_URL = "https://sammlerwert.REPLACE-ME.workers.dev"   # set to the URL wrangler prints after the first deploy (Stripe redirects)
+PUBLIC_URL = "https://sammlerwert.camerondillehay99.workers.dev"
 ADMIN_EMAILS = "camerondillehay99@gmail.com"
 # Secrets: npx wrangler secret put STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET / STRIPE_PRICE_SAMMLER / STRIPE_PRICE_PRO
 # (eBay keys belong to the GitHub Actions job, not the Worker.)
