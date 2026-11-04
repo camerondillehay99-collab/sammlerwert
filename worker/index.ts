@@ -47,7 +47,7 @@ export default {
     if (cache) { const hit = await cache.match(request); if (hit) return hit; }
     const res = await handleApp(request, db, console.log);
     if (!res) return env.ASSETS.fetch(request);
-    if (cache && res.ok) {
+    if (cache && res.ok && !/no-store/.test(res.headers.get("cache-control") ?? "")) {
       const ttl = url.pathname === "/api/health" ? 60 : 120;
       res.headers.set("cache-control", `public, max-age=60, s-maxage=${ttl}`);
       ctx.waitUntil(cache.put(request, res.clone()));

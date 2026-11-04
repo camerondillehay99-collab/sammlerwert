@@ -23,7 +23,8 @@ const placeholders = (s: string) => (s.match(/\{\w+\}/g) ?? []).sort().join("|")
 function prompt(lang: string, items: string[]): string {
   const numbered = items.map((t, i) => ({ i, de: t }));
   return `You translate user-interface strings of a trading-card collection app from German to ${lang}.
-Rules: keep every placeholder in curly braces exactly as it is (e.g. {n}, {BRAND}); keep product names unchanged (${KEEP.join(", ")}); keep punctuation style, arrows and the "·" separators; use the informal register where the language has one; keep translations short like UI labels; "Sammlung" is the user's card collection, "Set" is a card expansion, "Karte" is a trading card, "Note" means a grade.
+Context: the app tracks German-language Pokémon cards, so "deutsch"/"deutsche Karten" always means German (the printing language of the cards) – never adapt it to the reader's own country or language.
+Rules: keep every placeholder in curly braces exactly as it is (e.g. {n}, {BRAND}); keep product names unchanged (${KEEP.join(", ")}); keep punctuation style, arrows and the "·" separators; use the informal register where the language has one; keep translations short like UI labels but grammatical and natural – reorder words as the target language requires (e.g. "{qty} Karten importieren" is "Import {qty} cards", not "{qty} cards import"); "Sammlung" is the user's card collection, "Set" is a card expansion, "Karte" is a trading card, "Note" means a grade.
 Answer with JSON only: {"items":[{"i":<index>,"t":"<translation>"}, …]} with one entry per input index.
 ${JSON.stringify(numbered)}`;
 }
