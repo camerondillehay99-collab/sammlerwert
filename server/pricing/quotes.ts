@@ -43,7 +43,7 @@ export async function quoteCards(db: SqlDb, cards: CardForQuote[], languages: La
   const guideByProduct = new Map<number, GuideRow>();
   if (!cards.length) return { quotes, guideByProduct, guideDate: null };
   // The guide date changes once a night: memoised per isolate so it costs no round trip on the hot path.
-  const guideDate = await memo("cm_guide_date", 120_000, async () => (await db.first<{ value: string }>("SELECT value FROM meta WHERE key = 'cm_guide_date'"))?.value ?? null);
+  const guideDate = await memo(db, "cm_guide_date", 120_000, async () => (await db.first<{ value: string }>("SELECT value FROM meta WHERE key = 'cm_guide_date'"))?.value ?? null);
   const productIds = [...new Set(cards.map((c) => c.cm_product_id).filter((p): p is number => p != null))];
   const ids = cards.map((c) => c.id);
 

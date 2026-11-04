@@ -38,7 +38,7 @@ async function summaries(db: SqlDb, rows: CardRow[], withQuotes = true): Promise
 }
 
 async function ftsReady(db: SqlDb): Promise<boolean> {
-  return memo("fts_ready", 600_000, async () => !!(await db.first<{ n: number }>("SELECT 1 n FROM cards_fts LIMIT 1")));
+  return memo(db, "fts_ready", 600_000, async () => !!(await db.first<{ n: number }>("SELECT 1 n FROM cards_fts LIMIT 1")));
 }
 
 /** Build an FTS5 prefix query from free text: "glurak 199" → "glurak"* "199"* */
@@ -141,7 +141,7 @@ function saleToRecord(s: SaleRow): SaleRecord {
 
 interface SetRow { id: string; series_id: string | null; series_name: string | null; name_de: string | null; name_en: string | null; abbreviation: string | null; release_date: string | null; card_count_official: number | null; card_count_total: number | null; logo: string | null; symbol: string | null; cards_loaded: number }
 export async function listSets(db: SqlDb): Promise<SetSummary[]> {
-  return memo("sets_list", 300_000, () => listSetsUncached(db));
+  return memo(db, "sets_list", 300_000, () => listSetsUncached(db));
 }
 async function listSetsUncached(db: SqlDb): Promise<SetSummary[]> {
   return (await db.all<SetRow>(`SELECT s.*, se.name_de AS series_name, (SELECT COUNT(*) FROM cards c WHERE c.set_id = s.id) cards_loaded
@@ -173,7 +173,7 @@ export async function marketMovers(db: SqlDb, opts: { language?: Language; direc
 }
 
 export async function catalogStats(db: SqlDb) {
-  return memo("catalog_stats", 300_000, () => catalogStatsUncached(db));
+  return memo(db, "catalog_stats", 300_000, () => catalogStatsUncached(db));
 }
 async function catalogStatsUncached(db: SqlDb) {
   const r = (await db.first<Record<string, number | string | null>>(`SELECT

@@ -21,7 +21,7 @@ import "./import-routes.ts";
 
 // ---------- meta ----------
 add("GET", "/api/health", async (req, _p, db) => json({ ok: true, brand: config.brand.name, stats: await catalogStats(db), ebay: ebayConfigured(),
-  ebayInsights: await memo("ebay_insights", 300_000, async () => (await db.first<{ value: string }>("SELECT value FROM meta WHERE key = 'ebay_insights'"))?.value ?? null),
+  ebayInsights: await memo(db, "ebay_insights", 300_000, async () => (await db.first<{ value: string }>("SELECT value FROM meta WHERE key = 'ebay_insights'"))?.value ?? null),
   billing: stripeConfigured(), uploads: !!blobStore(), scan: scanAvailable(), edge: (req as Request & { cf?: { colo?: string } }).cf?.colo ?? null },
   200, { "cache-control": "public, max-age=60" }));
 

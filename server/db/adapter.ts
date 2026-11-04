@@ -11,6 +11,8 @@ export type Row = Record<string, unknown>;
 export interface Statement { sql: string; params: SqlValue[] }
 
 export interface SqlDb {
+  /** Identity for the memo cache: the underlying binding/handle, stable across wrapper instances (optional). */
+  memoKey?: object;
   /** Run a read query and return all rows. */
   all<T = Row>(sql: string, params?: SqlValue[]): Promise<T[]>;
   /** First row or null. */
@@ -34,18 +36,20 @@ export async function readMany<T extends Row[][] = Row[][]>(db: SqlDb, statement
   return out as T;
 }
 
-/** Tiny per-isolate memo with TTL for data that changes at most nightly (guide date, factors, stats). */
-const memoStore = new Map<string, { at: number; value: unknown; pending?: Promise<unknown> }>();
-export async function memo<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
-  const hit = memoStore.get(key);
+/** Tiny per-isolate memo with TTL for data that changes at most nightly (guide date, factors, stats). Scoped per database handle so tests (and any second DB) never share entries. */
+const memoStores = new WeakMap<object, Map<string, { at: number; value: unknown; pending?: Promise<unknown> }>>();
+function storeFor(db: object) { db = (db as { memoKey?: object }).memoKey ?? db; let m = memoStores.get(db); if (!m) { m = new Map(); memoStores.set(db, m); } return m; }
+export async function memo<T>(db: object, key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
+  const store = storeFor(db);
+  const hit = store.get(key);
   const now = Date.now();
   if (hit && now - hit.at < ttlMs) return hit.value as T;
   if (hit?.pending) return hit.pending as Promise<T>;
-  const pending = load().then((value) => { memoStore.set(key, { at: Date.now(), value }); return value; }).catch((e) => { memoStore.delete(key); throw e; });
-  memoStore.set(key, { at: hit?.at ?? 0, value: hit?.value, pending });
+  const pending = load().then((value) => { if (value == null) store.delete(key); else store.set(key, { at: Date.now(), value }); return value; }).catch((e) => { store.delete(key); throw e; });
+  store.set(key, { at: hit?.at ?? 0, value: hit?.value, pending });
   return pending;
 }
-export function memoClear(prefix = "") { for (const k of [...memoStore.keys()]) if (k.startsWith(prefix)) memoStore.delete(k); }
+export function memoClear(db: object, prefix = "") { const store = storeFor(db); for (const k of [...store.keys()]) if (k.startsWith(prefix)) store.delete(k); }
 
 export const MAX_PARAMS = 100; // D1 limit per statement; we honour it everywhere.
 

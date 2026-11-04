@@ -16,6 +16,7 @@ export interface D1DatabaseLike {
 
 export class D1Db implements SqlDb {
   constructor(private d1: D1DatabaseLike) {}
+  get memoKey(): object { return this.d1; }
   private prep(sql: string, params: SqlValue[]) { return this.d1.prepare(sql).bind(...params.map(norm)); }
   async all<T = Row>(sql: string, params: SqlValue[] = []): Promise<T[]> { return (await this.prep(sql, params).all<T>()).results; }
   async first<T = Row>(sql: string, params: SqlValue[] = []): Promise<T | null> { return (await this.prep(sql, params).first<T>()) ?? null; }

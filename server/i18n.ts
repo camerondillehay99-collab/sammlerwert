@@ -54,7 +54,7 @@ export async function ensureI18nTable(db: SqlDb) {
 export async function uiDictionary(db: SqlDb, lang: string, opts: { translate?: boolean; maxBatches?: number } = {}): Promise<{ entries: Record<string, string>; complete: boolean }> {
   const name = UI_LANGS[lang];
   if (!name) return { entries: {}, complete: true };
-  const cached = await memo(`i18n:${lang}`, 600_000, async () => {
+  const cached = await memo(db, `i18n:${lang}`, 600_000, async () => {
     const rows = await db.all<{ key: string; text: string }>("SELECT key, text FROM ui_translations WHERE lang = ?", [lang]).catch(() => [] as Array<{ key: string; text: string }>);
     return Object.fromEntries(rows.map((r) => [r.key, r.text])) as Record<string, string>;
   });
@@ -71,7 +71,7 @@ export async function uiDictionary(db: SqlDb, lang: string, opts: { translate?: 
   if (fresh.size) {
     const rows = [...fresh];
     for (let i = 0; i < rows.length; i += 30) await db.batch(rows.slice(i, i + 30).map(([k, v]) => stmt("INSERT OR REPLACE INTO ui_translations(lang, key, text) VALUES (?, ?, ?)", lang, k, v)));
-    memoClear(`i18n:${lang}`);
+    memoClear(db, `i18n:${lang}`);
   }
   const entries = { ...cached, ...Object.fromEntries(fresh) };
   return { entries, complete: keys.every((k) => k in entries) };
