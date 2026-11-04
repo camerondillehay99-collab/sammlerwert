@@ -9,7 +9,7 @@ import { JOB_NAMES, runJob, type JobName } from "../jobs/scheduler.ts";
 import { ebayConfigured } from "../ingest/ebay.ts";
 import { blobStore } from "../storage.ts";
 import { scanAvailable, scanImage } from "../scan.ts";
-import { UI_LANGS, uiDictionary } from "../i18n.ts";
+import { UI_LANGS, uiDictionary, i18nLastError } from "../i18n.ts";
 
 import { add } from "./router.ts";
 export { matchRoute, hasPath } from "./router.ts";
@@ -30,7 +30,8 @@ add("GET", "/api/i18n/:lang", async (_r, p, db) => {
   const lang = String(p.lang ?? "").toLowerCase();
   if (!UI_LANGS[lang]) throw notFound("Sprache nicht verfügbar.");
   const r = await uiDictionary(db, lang);
-  return json({ lang, ...r }, 200, { "cache-control": r.complete ? "public, max-age=3600" : "no-store" });
+  const error = !r.complete && !Object.keys(r.entries).length ? i18nLastError(lang) : null;
+  return json({ lang, ...r, ...(error ? { error } : {}) }, 200, { "cache-control": r.complete ? "public, max-age=3600" : "no-store" });
 });
 
 // ---------- scanner ----------

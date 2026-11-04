@@ -15,34 +15,51 @@ export function textAiAvailable() { return ai != null; }
 
 export const TEXT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 export const UI_LANGS: Record<string, string> = { fr: "French", es: "Spanish", it: "Italian", nl: "Dutch", pt: "European Portuguese", pl: "Polish", cs: "Czech", sv: "Swedish", da: "Danish", tr: "Turkish", ja: "Japanese", ko: "Korean", zh: "Simplified Chinese" };
-const BATCH = 40;
+const BATCH = 25;
 const KEEP = ["Sammlerwert", "Cardmarket", "Collectr", "Card Ladder", "TCGplayer", "PSA", "CGC", "BGS", "eBay", "Pokémon"];
 
 const placeholders = (s: string) => (s.match(/\{\w+\}/g) ?? []).sort().join("|");
 
 function prompt(lang: string, items: string[]): string {
+  const numbered = items.map((t, i) => ({ i, de: t }));
   return `You translate user-interface strings of a trading-card collection app from German to ${lang}.
 Rules: keep every placeholder in curly braces exactly as it is (e.g. {n}, {BRAND}); keep product names unchanged (${KEEP.join(", ")}); keep punctuation style, arrows and the "·" separators; use the informal register where the language has one; keep translations short like UI labels; "Sammlung" is the user's card collection, "Set" is a card expansion, "Karte" is a trading card, "Note" means a grade.
-Answer with ONLY a JSON array of ${items.length} strings in the same order, no commentary.
-${JSON.stringify(items)}`;
+Answer with JSON only: {"items":[{"i":<index>,"t":"<translation>"}, …]} with one entry per input index.
+${JSON.stringify(numbered)}`;
 }
 
-async function translateBatch(lang: string, items: string[]): Promise<Map<string, string>> {
+/** Last failure per language (for diagnostics in the API response – never secrets). */
+const lastError = new Map<string, string>();
+export const i18nLastError = (lang: string) => lastError.get(lang) ?? null;
+
+const SCHEMA = { type: "object", properties: { items: { type: "array", items: { type: "object", properties: { i: { type: "integer" }, t: { type: "string" } }, required: ["i", "t"] } } }, required: ["items"] };
+
+async function translateBatch(lang: string, name: string, items: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   if (!ai) return out;
-  const res = await ai.run(TEXT_MODEL, { messages: [{ role: "user", content: prompt(lang, items) }], max_tokens: 4000, temperature: 0.1 }) as { response?: string } | string;
-  const text = typeof res === "string" ? res : res?.response ?? "";
-  const m = text.match(/\[[\s\S]*\]/);
-  if (!m) return out;
-  let arr: unknown;
-  try { arr = JSON.parse(m[0]); } catch { return out; }
-  if (!Array.isArray(arr) || arr.length !== items.length) return out;
-  items.forEach((src, i) => {
-    const t = arr[i];
-    if (typeof t !== "string" || !t.trim()) return;
-    if (placeholders(src) !== placeholders(t)) return; // a lost placeholder would break the UI – keep English instead
+  let text = "";
+  try {
+    const res = await ai.run(TEXT_MODEL, { messages: [{ role: "user", content: prompt(name, items) }], max_tokens: 4000, temperature: 0.1, response_format: { type: "json_schema", json_schema: SCHEMA } }) as { response?: unknown } | string;
+    const raw = typeof res === "string" ? res : res?.response;
+    text = typeof raw === "string" ? raw : JSON.stringify(raw ?? "");
+  } catch (e) { lastError.set(lang, `model: ${String((e as Error).message ?? e).slice(0, 200)}`); return out; }
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { const m = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/); try { parsed = m ? JSON.parse(m[0]) : null; } catch { parsed = null; } }
+  // Accept {items:[{i,t}]}, a bare [{i,t}] array, or a plain string array in order.
+  let entries: Array<{ i: number; t: string }> = [];
+  const arr = Array.isArray(parsed) ? parsed : (parsed as { items?: unknown })?.items;
+  if (Array.isArray(arr)) {
+    if (arr.every((x) => typeof x === "string")) entries = (arr as string[]).map((t, i) => ({ i, t }));
+    else entries = (arr as Array<{ i?: unknown; t?: unknown }>).filter((x) => x && typeof x.t === "string" && Number.isInteger(Number(x.i))).map((x) => ({ i: Number(x.i), t: String(x.t) }));
+  }
+  if (!entries.length) { lastError.set(lang, `parse: ${text.slice(0, 200)}`); return out; }
+  for (const { i, t } of entries) {
+    const src = items[i];
+    if (src == null || !t.trim()) continue;
+    if (placeholders(src) !== placeholders(t)) continue; // a lost placeholder would break the UI – keep English instead
     out.set(src, t.trim());
-  });
+  }
+  if (out.size) lastError.delete(lang);
   return out;
 }
 
@@ -65,7 +82,7 @@ export async function uiDictionary(db: SqlDb, lang: string, opts: { translate?: 
   const batches: string[][] = [];
   for (let i = 0; i < missing.length; i += BATCH) batches.push(missing.slice(i, i + BATCH));
   const todo = batches.slice(0, opts.maxBatches ?? 20);
-  const results = await Promise.all(todo.map((b) => translateBatch(name, b).catch(() => new Map<string, string>())));
+  const results = await Promise.all(todo.map((b) => translateBatch(lang, name, b).catch(() => new Map<string, string>())));
   const fresh = new Map<string, string>();
   for (const r of results) for (const [k, v] of r) fresh.set(k, v);
   if (fresh.size) {

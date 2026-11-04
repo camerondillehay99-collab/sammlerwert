@@ -18,9 +18,10 @@ describe("i18n", () => {
     let calls = 0;
     useTextAi({ async run(_model, input) {
       calls++;
-      const items = JSON.parse(String((input.messages as Array<{ content: string }>)[0]!.content).match(/\[[\s\S]*\]$/)![0]) as string[];
-      // "translate" by prefixing; drop the placeholder on purpose in one string to prove the guard
-      return { response: JSON.stringify(items.map((s) => (s.startsWith("{n} ausgewählt") ? "sélectionné" : `fr:${s}`))) };
+      const items = (JSON.parse(String((input.messages as Array<{ content: string }>)[0]!.content).match(/\n(\[[\s\S]*\])$/)![1]) as Array<{ i: number; de: string }>);
+      expect((input as { response_format?: { type: string } }).response_format?.type).toBe("json_schema");
+      // "translate" by prefixing; drop the placeholder on purpose in one string to prove the guard; answer out of order to prove index mapping
+      return { response: JSON.stringify({ items: items.slice().reverse().map(({ i, de }) => ({ i, t: de.startsWith("{n} ausgewählt") ? "sélectionné" : `fr:${de}` })) }) };
     } });
     const first = await uiDictionary(db, "fr");
     expect(calls).toBeGreaterThan(0);
