@@ -52,17 +52,28 @@ export function workersAiProvider(ai: { run(model: string, input: Record<string,
   return {
     async readCard(image) {
       const input = { image: [...image], prompt: READ_PROMPT, max_tokens: 300, temperature: 0.1 };
-      const call = async () => (await ai.run(VISION_MODEL, input)) as { response?: string } | string;
-      let out: { response?: string } | string;
+      const call = async () => ai.run(VISION_MODEL, input);
+      let out: unknown;
       try { out = await call(); }
       catch (e) {
         if (!/licen[cs]e|agree/i.test(String((e as Error).message))) throw e;
         await ai.run(VISION_MODEL, { prompt: "agree" });
         out = await call();
       }
-      return typeof out === "string" ? out : out.response ?? "";
+      return modelText(out);
     },
   };
+}
+
+/** Workers AI answers come in several shapes (plain string, { response }, chat-style choices, or an already parsed object). */
+export function modelText(out: unknown): string {
+  if (out == null) return "";
+  if (typeof out === "string") return out;
+  const o = out as Record<string, unknown>;
+  const r = o.response ?? o.result ?? (o.choices as Array<{ message?: { content?: unknown } }> | undefined)?.[0]?.message?.content ?? o;
+  if (typeof r === "string") return r;
+  if (r instanceof Uint8Array || r instanceof ArrayBuffer) return new TextDecoder().decode(r as ArrayBuffer);
+  try { return JSON.stringify(r); } catch { return String(r); }
 }
 
 /** "199/165" → { number: "199", total: 165 }; "SV049/SV122" → { "SV049", 122 }; "006" → { "006", null }. */

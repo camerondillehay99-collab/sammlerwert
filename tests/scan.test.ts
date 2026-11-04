@@ -2,7 +2,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { openBunDb } from "../server/db/bun-sqlite.ts";
 import { rebuildFts } from "../server/ingest/tcgdex.ts";
-import { findCandidates, numberKey, parseFacts, parseNumber, scanImage, useScanProvider } from "../server/scan.ts";
+import { findCandidates, modelText, numberKey, parseFacts, parseNumber, scanImage, useScanProvider } from "../server/scan.ts";
 
 const db = await openBunDb(":memory:");
 
@@ -39,6 +39,13 @@ describe("parsing", () => {
     const g = parseFacts('{"name": "Charizard", "number": null, "language": "en", "finish": "normal", "grading": "null", "set": "Base Set",}');
     expect(g.number).toBeNull(); expect(g.setHint).toBe("Base Set"); expect(g.gradingCompany).toBeNull();
     expect(parseFacts("I cannot read this image").name).toBeNull();
+  });
+  test("model output shapes", () => {
+    expect(modelText("x")).toBe("x");
+    expect(modelText({ response: "y" })).toBe("y");
+    expect(modelText({ response: { name: "Glurak", number: "4/102" } })).toContain("\"number\":\"4/102\"");
+    expect(modelText({ choices: [{ message: { content: "z" } }] })).toBe("z");
+    expect(parseFacts(modelText({ response: { name: "Glurak", number: "4/102", language: "de" } })).number).toBe("4");
   });
 });
 
