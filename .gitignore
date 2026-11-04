@@ -6,4 +6,3 @@ data/uploads/
 web/public/assets/
 .env
 *.log
-.sync-state.json

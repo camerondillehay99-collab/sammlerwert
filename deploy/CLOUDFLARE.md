@@ -25,6 +25,13 @@ Doppelklick `deploy\cloudflare-first-deploy.cmd`: Cloudflare-Login, zeigt deine 
 
 Ab jetzt deployt **jeder Push auf `main`** automatisch (`.github/workflows/deploy.yml`: Tests → Build → `wrangler deploy`). Lokal geht weiterhin `deploy\cloudflare-redeploy.cmd`.
 
+## Code-Sync aus dem Arbeitsbereich (ohne manuellen Upload)
+
+Der Entwicklungs-Arbeitsbereich kann nicht direkt nach GitHub pushen. Stattdessen landen Änderungen als
+gzip/base64-Zeilen in der D1-Tabelle `deploy_patches`; der Workflow `sync.yml` (manuell oder alle 30 Minuten)
+schreibt sie per `scripts/sync-from-d1.ts` in den Checkout, committet auf `main`, markiert die Zeilen als
+angewendet und startet `deploy.yml`. Live-Adresse: https://sammlerwert.camerondillehay99.workers.dev
+
 ## Schreibbudget (D1 Free: 100 000 Zeilen/Tag inkl. Index-Zeilen)
 | Vorgang | Zeilen |
 | --- | --- |
