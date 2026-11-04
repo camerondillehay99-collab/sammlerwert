@@ -17,6 +17,10 @@ binding = "DB"
 database_name = "sammlerwert"
 database_id = "08e0e704-3b2c-4884-9318-1b0a249ee37c"
 
+# Workers AI: card scanner (vision model reads name/number from a photo). Included with the Workers plan.
+[ai]
+binding = "AI"
+
 # R2 (10 GB free): enable R2 once in the dashboard, create bucket "sammlerwert-uploads", then uncomment:
 # [[r2_buckets]]
 # binding = "UPLOADS"

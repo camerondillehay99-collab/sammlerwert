@@ -225,6 +225,17 @@ CREATE TABLE IF NOT EXISTS job_runs (
   detail TEXT
 );
 
+-- Scanner log: what the vision model read and which card we picked (quality tracking, daily limits).
+CREATE TABLE IF NOT EXISTS scans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER,
+  created_at TEXT NOT NULL,
+  facts TEXT,
+  card_id TEXT,
+  confidence REAL,
+  ms INTEGER
+);
+
 -- Per-card bookkeeping for the eBay rotation (see server/ingest/ebay.ts dueCards).
 CREATE TABLE IF NOT EXISTS ebay_refresh (
   card_id TEXT PRIMARY KEY REFERENCES cards(id),

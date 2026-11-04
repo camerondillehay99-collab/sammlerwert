@@ -9,6 +9,7 @@ import { applySubscriptionEvent, createCheckoutSession, createPortalSession, str
 import { JOB_NAMES, runJob, type JobName } from "../jobs/scheduler.ts";
 import { ebayConfigured } from "../ingest/ebay.ts";
 import { blobStore } from "../storage.ts";
+import { scanAvailable, scanImage } from "../scan.ts";
 
 type Handler = (req: Request, params: Record<string, string>, db: SqlDb) => Promise<Response> | Response;
 export interface Route { method: string; pattern: string; handler: Handler; keys: string[]; re: RegExp }
@@ -36,7 +37,26 @@ const GRADERS: readonly GradingCompany[] = ["PSA", "BGS", "CGC", "GSG", "AP", "T
 
 // ---------- meta ----------
 add("GET", "/api/health", async (_r, _p, db) => json({ ok: true, brand: config.brand.name, stats: await catalogStats(db), ebay: ebayConfigured(),
-  ebayInsights: (await db.first<{ value: string }>("SELECT value FROM meta WHERE key = 'ebay_insights'"))?.value ?? null, billing: stripeConfigured(), uploads: !!blobStore() }));
+  ebayInsights: (await db.first<{ value: string }>("SELECT value FROM meta WHERE key = 'ebay_insights'"))?.value ?? null, billing: stripeConfigured(), uploads: !!blobStore(), scan: scanAvailable() }));
+
+// ---------- scanner ----------
+const SCAN_MAX_BYTES = 3_000_000;
+add("POST", "/api/scan", async (req, _p, db) => {
+  if (!scanAvailable()) throw new ApiError(503, "Der Scanner ist in dieser Umgebung nicht aktiviert.", "scan_unavailable");
+  const mime = (req.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+  if (!/^image\/(jpeg|png|webp)$/.test(mime)) throw badRequest("Bitte ein JPEG-, PNG- oder WebP-Bild senden.");
+  const buf = new Uint8Array(await req.arrayBuffer());
+  if (!buf.length) throw badRequest("Leeres Bild.");
+  if (buf.length > SCAN_MAX_BYTES) throw badRequest("Bild zu groß (max. 3 MB).");
+  const user = await currentUser(db, req);
+  if (user) {
+    const today = new Date().toISOString().slice(0, 10);
+    const n = (await db.first<{ n: number }>("SELECT COUNT(*) n FROM scans WHERE user_id = ? AND created_at >= ?", [user.id, today]))?.n ?? 0;
+    const limit = planLimits(user.plan).scansPerDay;
+    if (n >= limit) throw paymentRequired(`Tageslimit von ${limit} Scans erreicht – mit Sammler oder Pro scannst du unbegrenzt.`);
+  }
+  return json(await scanImage(db, buf, mime, user?.id ?? null));
+});
 
 // ---------- auth ----------
 add("POST", "/api/auth/register", async (req, _p, db) => {

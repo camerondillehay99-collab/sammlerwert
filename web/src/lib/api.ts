@@ -1,4 +1,4 @@
-import type { CardDetail, CardSummary, CollectionItem, PortfolioSummary, SetSummary, User } from "../../../shared/types.ts";
+import type { CardDetail, CardSummary, CollectionItem, PortfolioSummary, ScanResultPublic, SetSummary, User } from "../../../shared/types.ts";
 
 export class HttpError extends Error { constructor(public status: number, message: string, public code?: string) { super(message); } }
 
@@ -42,6 +42,12 @@ export const api = {
   sets: () => cached<{ items: SetSummary[] }>("/api/sets", 300_000),
   set: (id: string, sort = "number") => cached<{ set: SetSummary; cards: CardSummary[] }>(`/api/sets/${encodeURIComponent(id)}?sort=${sort}`, 120_000),
   card: (id: string) => cached<CardDetail>(`/api/cards/${encodeURIComponent(id)}`, 20_000),
+  scan: async (image: Blob): Promise<ScanResultPublic> => {
+    const res = await fetch("/api/scan", { method: "POST", credentials: "same-origin", headers: { "content-type": image.type || "image/jpeg" }, body: image });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new HttpError(res.status, data?.error ?? `Fehler ${res.status}`, data?.code);
+    return data as ScanResultPublic;
+  },
   movers: (lang = "de") => cached<{ up: Movers[]; down: Movers[] }>(`/api/market/movers?lang=${lang}`, 120_000),
   reportSale: (cardId: string, body: Record<string, unknown>) => call<CardDetail>("POST", `/api/cards/${encodeURIComponent(cardId)}/sales`, body),
   portfolio: () => call<PortfolioSummary>("GET", "/api/portfolio"),

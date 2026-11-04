@@ -161,3 +161,10 @@ export interface Insight { kind: "info" | "up" | "down" | "warn"; title: string;
 export interface User { id: number; email: string; name: string | null; plan: Plan; planStatus: string | null; locale: string; createdAt: string }
 
 export interface ApiError { error: string; code?: string }
+
+export interface ScanFactsPublic {
+  name: string | null; number: string | null; total: number | null; language: string | null;
+  finish: "normal" | "holo" | "reverse" | null; gradingCompany: string | null; grade: number | null; setHint: string | null;
+}
+export interface ScanCandidatePublic { card: CardSummary; score: number; reasons: string[] }
+export interface ScanResultPublic { facts: ScanFactsPublic; best: ScanCandidatePublic | null; alternatives: ScanCandidatePublic[]; confidence: number; ms: number }

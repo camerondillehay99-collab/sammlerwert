@@ -50,9 +50,9 @@ export function buildConfig(e: EnvMap) {
       pricePro: env("STRIPE_PRICE_PRO"),
     },
     limits: {
-      free: { items: 50, collections: 1, history: false, alerts: 0, exports: false },
-      sammler: { items: 2500, collections: 5, history: true, alerts: 25, exports: true },
-      pro: { items: Infinity, collections: Infinity, history: true, alerts: Infinity, exports: true },
+      free: { items: 50, collections: 1, history: false, alerts: 0, exports: false, scansPerDay: 30 },
+      sammler: { items: 2500, collections: 5, history: true, alerts: 25, exports: true, scansPerDay: 1000 },
+      pro: { items: Infinity, collections: Infinity, history: true, alerts: Infinity, exports: true, scansPerDay: Infinity },
     },
   };
 }

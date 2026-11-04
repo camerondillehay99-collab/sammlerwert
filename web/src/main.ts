@@ -7,12 +7,14 @@ import { cardView } from "./views/card.ts";
 import { collection } from "./views/collection.ts";
 import { sets, setView } from "./views/sets.ts";
 import { market, authView, settings, pricing, legal, methodik } from "./views/misc.ts";
+import { scanView } from "./views/scan.ts";
 
 const BRAND = (document.querySelector('meta[name="application-name"]') as HTMLMetaElement | null)?.content ?? "Sammlerwert";
 document.documentElement.dataset.theme = state.theme;
 
 route("/", dashboard, `${BRAND} – Portfolio`);
 route("/suche", search, `Suche – ${BRAND}`);
+route("/scan", scanView, `Scanner – ${BRAND}`);
 route("/karte/:id", cardView, BRAND);
 route("/sammlung", collection, `Meine Sammlung – ${BRAND}`);
 route("/sets", sets, `Sets – ${BRAND}`);
@@ -29,13 +31,14 @@ route("/datenschutz", legal("datenschutz"), `Datenschutz – ${BRAND}`);
 const NAV = [
   { href: "/", icon: icons.home, label: "Portfolio", match: (p: string) => p === "/" },
   { href: "/sammlung", icon: icons.cards, label: "Sammlung", match: (p: string) => p.startsWith("/sammlung") },
+  { href: "/scan", icon: icons.camera, label: "Scannen", match: (p: string) => p.startsWith("/scan"), hero: true },
   { href: "/suche", icon: icons.search, label: "Suche", match: (p: string) => p.startsWith("/suche") || p.startsWith("/karte") },
   { href: "/sets", icon: icons.sets, label: "Sets", match: (p: string) => p.startsWith("/sets") },
   { href: "/markt", icon: icons.market, label: "Markt", match: (p: string) => p.startsWith("/markt") },
 ];
 
 function navLinks(cls: string) {
-  return NAV.map((n) => h("a", { class: cls, href: n.href, dataset: { nav: n.href } }, svg(n.icon, 20), h("span", null, n.label)));
+  return NAV.map((n) => h("a", { class: `${cls}${n.hero ? " hero" : ""}`, href: n.href, dataset: { nav: n.href } }, svg(n.icon, 20), h("span", null, n.label)));
 }
 
 function shell(): HTMLElement {
@@ -44,7 +47,7 @@ function shell(): HTMLElement {
     h("nav", { class: "nav" }, ...navLinks("nav-item")),
     h("div", { class: "sidebar-foot" }, userBox(), h("p", { class: "foot-links" }, h("a", { href: "/tarife" }, "Tarife"), " · ", h("a", { href: "/methodik" }, "Methodik"), " · ", h("a", { href: "/impressum" }, "Impressum"), " · ", h("a", { href: "/datenschutz" }, "Datenschutz"))),
   );
-  const mobile = h("nav", { class: "mobile-nav" }, ...navLinks("mnav-item"));
+  const mobile = h("nav", { class: "mobile-nav" }, ...navLinks("mnav-item").filter((a) => (a as HTMLAnchorElement).dataset.nav !== "/sets"));
   const main = h("main", { class: "main", id: "outlet" });
   const topbar = h("header", { class: "topbar" }, h("a", { class: "brand", href: "/" }, h("span", { class: "brand-mark" }, "S"), h("strong", null, BRAND)), h("div", { class: "topbar-actions" }, themeBtn(), userMini()));
   return h("div", { class: "shell" }, sidebar, h("div", { class: "content" }, topbar, main), mobile, h("div", { class: "toast", id: "toast", role: "status", "aria-live": "polite" }));

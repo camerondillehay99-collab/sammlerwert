@@ -8,10 +8,12 @@ import { useDb } from "../server/db/index.ts";
 import { handleApp } from "../server/app.ts";
 import { runJob } from "../server/jobs/scheduler.ts";
 import { r2Store, useBlobStore, type R2BucketLike } from "../server/storage.ts";
+import { useScanProvider, workersAiProvider } from "../server/scan.ts";
 
 export interface Env {
   DB: D1DatabaseLike;
   UPLOADS?: R2BucketLike;
+  AI?: { run(model: string, input: Record<string, unknown>): Promise<unknown> };
   ASSETS: { fetch(req: Request): Promise<Response> };
   [key: string]: unknown;
 }
@@ -26,6 +28,7 @@ function setup(env: Env) {
   const db = new D1Db(env.DB);
   useDb(db);
   useBlobStore(env.UPLOADS ? r2Store(env.UPLOADS) : null);
+  useScanProvider(env.AI ? workersAiProvider(env.AI) : null);
   return db;
 }
 

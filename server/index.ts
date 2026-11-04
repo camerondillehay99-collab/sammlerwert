@@ -7,6 +7,7 @@ import { openBunDb } from "./db/bun-sqlite.ts";
 import { handleApp, withHeaders } from "./app.ts";
 import { startScheduler } from "./jobs/scheduler.ts";
 import { useBlobStore, type BlobStore } from "./storage.ts";
+import { useScanProvider } from "./scan.ts";
 
 const WEB_DIR = resolve(config.webDir);
 const UPLOADS_DIR = resolve(config.uploadsDir);
@@ -24,6 +25,8 @@ const fsStore: BlobStore = {
   },
 };
 useBlobStore(fsStore);
+// Local development has no Workers AI; SCAN_FAKE='{"name":"Glurak-ex","number":"199/165",...}' lets the scanner UI be exercised.
+if (process.env.SCAN_FAKE) useScanProvider({ readCard: async () => process.env.SCAN_FAKE! });
 
 const STATIC_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json",
