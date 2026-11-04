@@ -45,6 +45,11 @@ function mapApi(certNo: string, j: Record<string, unknown>): PsaCert {
 
 export class PsaError extends Error { constructor(message: string, public status: number) { super(message); } }
 
+/** First 120 chars of an error body, for the message shown to admins; empty when there is none. */
+async function snippet(res: Response): Promise<string> {
+  try { const t = (await res.text()).replace(/\s+/g, " ").trim(); return t ? `: ${t.slice(0, 120)}` : ""; } catch { return ""; }
+}
+
 export async function lookupCert(db: SqlDb, certRaw: string): Promise<PsaCert | null> {
   const certNo = normalizeCert(certRaw);
   if (!certNo || certNo.length < 6 || certNo.length > 12) throw new PsaError("Bitte eine gültige PSA-Zertifikatsnummer (6–12 Ziffern) eingeben.", 400);
@@ -53,9 +58,9 @@ export async function lookupCert(db: SqlDb, certRaw: string): Promise<PsaCert | 
   if (!psaConfigured()) throw new PsaError("PSA-Abfragen sind noch nicht aktiviert (PSA_API_TOKEN fehlt).", 503);
   const res = await fetch(`${config.psa.base}/cert/GetByCertNumber/${certNo}`, { headers: { authorization: `bearer ${config.psa.token}`, accept: "application/json" } });
   if (res.status === 404) { await db.run("INSERT OR REPLACE INTO psa_certs(cert_no, fetched_at, payload) VALUES (?, ?, 'null')", [certNo, nowIso()]); return null; }
-  if (res.status === 401 || res.status === 403) throw new PsaError("PSA hat den API-Token abgelehnt.", 502);
-  if (res.status === 429) throw new PsaError("PSA-Tageslimit erreicht – bitte später erneut versuchen.", 429);
-  if (!res.ok) throw new PsaError(`PSA antwortet mit ${res.status}.`, 502);
+  if (res.status === 401 || res.status === 403) throw new PsaError(`PSA hat den API-Token abgelehnt (HTTP ${res.status}${await snippet(res)}). Bitte auf psacard.com → Public API ein neues Token erzeugen und als PSA_API_TOKEN hinterlegen.`, 502);
+  if (res.status === 429) throw new PsaError("PSA-Tageslimit erreicht (100 Abfragen pro Tag) – bereits geprüfte Zertifikate bleiben gespeichert, neue bitte morgen.", 429);
+  if (!res.ok) throw new PsaError(`PSA antwortet mit HTTP ${res.status}${await snippet(res)}.`, 502);
   const j = (await res.json()) as Record<string, unknown>;
   const cert = mapApi(certNo, j);
   if (!cert.subject && !cert.brand) { await db.run("INSERT OR REPLACE INTO psa_certs(cert_no, fetched_at, payload) VALUES (?, ?, 'null')", [certNo, nowIso()]); return null; }

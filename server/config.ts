@@ -45,7 +45,7 @@ export function buildConfig(e: EnvMap) {
     },
     psa: {
       /** PSA Public API token (psacard.com → Public API). Enables certificate lookups for slabs and PSA list imports. */
-      token: env("PSA_API_TOKEN"),
+      token: env("PSA_API_TOKEN").trim().replace(/^bearer\s+/i, ""),
       base: env("PSA_API_BASE", "https://api.psacard.com/publicapi"),
     },
     stripe: {
