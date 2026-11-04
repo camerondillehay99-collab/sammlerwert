@@ -1,6 +1,7 @@
 // Tiny DOM toolkit: hyperscript, formatters, helpers. No framework – the app stays < 60 KB.
 import type { CardSummary, Language, Variant } from "../../../shared/types.ts";
 import { CONDITION_LABELS, LANGUAGE_LABELS, VARIANT_LABELS } from "../../../shared/types.ts";
+import { locale, tr, getLang, getEdition } from "./i18n.ts";
 
 type Child = Node | string | number | null | undefined | false | Child[];
 type Props = Record<string, unknown> | null;
@@ -84,18 +85,20 @@ export const icons = {
   check2: `<path d="m4 12 5 5L20 6"/>`,
 };
 
+const loc = () => locale();
 export const fmt = {
-  eur: (n: number | null | undefined, digits = 2) => n == null || !Number.isFinite(n) ? "–" : new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n),
-  eurCompact: (n: number | null | undefined) => n == null ? "–" : n >= 10000 ? new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n) : fmt.eur(n),
-  pct: (n: number | null | undefined, signed = true) => n == null || !Number.isFinite(n) ? "–" : `${signed && n > 0 ? "+" : ""}${(n * 100).toFixed(1).replace(".", ",")} %`,
-  int: (n: number | null | undefined) => n == null ? "–" : new Intl.NumberFormat("de-DE").format(n),
-  date: (iso: string | null | undefined) => iso ? new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" }).format(parseDate(iso)) : "–",
-  dateShort: (iso: string) => new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "short" }).format(parseDate(iso)),
+  eur: (n: number | null | undefined, digits = 2) => n == null || !Number.isFinite(n) ? "–" : new Intl.NumberFormat(loc(), { style: "currency", currency: "EUR", minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n),
+  eurCompact: (n: number | null | undefined) => n == null ? "–" : n >= 10000 ? new Intl.NumberFormat(loc(), { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n) : fmt.eur(n),
+  pct: (n: number | null | undefined, signed = true) => n == null || !Number.isFinite(n) ? "–" : `${signed && n > 0 ? "+" : ""}${new Intl.NumberFormat(loc(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(n * 100)} %`,
+  int: (n: number | null | undefined) => n == null ? "–" : new Intl.NumberFormat(loc()).format(n),
+  date: (iso: string | null | undefined) => iso ? new Intl.DateTimeFormat(loc(), { day: "2-digit", month: "2-digit", year: "numeric" }).format(parseDate(iso)) : "–",
+  dateShort: (iso: string) => new Intl.DateTimeFormat(loc(), { day: "2-digit", month: "short" }).format(parseDate(iso)),
   rel: (iso: string | null | undefined) => {
     if (!iso) return "–";
     const d = (Date.now() - new Date(iso).getTime()) / 86_400_000;
-    if (d < 1) return "heute"; if (d < 2) return "gestern"; if (d < 30) return `vor ${Math.floor(d)} Tagen`; if (d < 365) return `vor ${Math.floor(d / 30)} Monaten`;
-    return `vor ${Math.floor(d / 365)} Jahren`;
+    const rtf = new Intl.RelativeTimeFormat(loc(), { numeric: "auto" });
+    if (d < 1) return rtf.format(0, "day"); if (d < 2) return rtf.format(-1, "day"); if (d < 30) return rtf.format(-Math.floor(d), "day"); if (d < 365) return rtf.format(-Math.floor(d / 30), "month");
+    return rtf.format(-Math.floor(d / 365), "year");
   },
 };
 
@@ -103,14 +106,14 @@ export const fmt = {
 export function parseDate(s: string): Date { return /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T12:00:00`) : new Date(s); }
 
 export const label = {
-  language: (l: string) => LANGUAGE_LABELS[l as Language] ?? l,
-  variant: (v: string) => VARIANT_LABELS[v as Variant] ?? v,
-  condition: (c: string) => CONDITION_LABELS[c as keyof typeof CONDITION_LABELS] ?? c,
-  confidence: (c: number | null | undefined) => c == null ? "keine Daten" : c >= 0.75 ? "hoch" : c >= 0.45 ? "mittel" : "niedrig",
-  method: (m: string) => ({
+  language: (l: string) => tr(LANGUAGE_LABELS[l as Language] ?? l),
+  variant: (v: string) => tr(VARIANT_LABELS[v as Variant] ?? v),
+  condition: (c: string) => tr(CONDITION_LABELS[c as keyof typeof CONDITION_LABELS] ?? c),
+  confidence: (c: number | null | undefined) => c == null ? tr("keine Daten") : c >= 0.75 ? tr("hoch") : c >= 0.45 ? tr("mittel") : tr("niedrig"),
+  method: (m: string) => tr(({
     "sales+guide": "Verkäufe + Cardmarket-Preisguide", sales_only: "Nur Verkäufe", "guide×language_factor": "Cardmarket-Preisguide, sprachbereinigt",
     guide_only: "Cardmarket-Preisguide (alle Sprachen)", listings_only: "Nur aktive Angebote", none: "Keine Daten",
-  } as Record<string, string>)[m.replace("+listings", "")] ?? m,
+  } as Record<string, string>)[m.replace("+listings", "")] ?? m),
 };
 
 export function cardImage(card: Pick<CardSummary, "image" | "imageEn">, quality: "low" | "high" = "low"): string | null {
@@ -134,7 +137,11 @@ export function imgOr(src: string | null, fallback: () => HTMLElement, attrs: Re
   return img;
 }
 
-export function cardName(card: Pick<CardSummary, "nameDe" | "nameEn">) { return card.nameDe ?? card.nameEn ?? "Unbenannt"; }
+/** German name for German UI/edition, English name otherwise (card names are catalogue data, not UI strings). */
+export function cardName(card: Pick<CardSummary, "nameDe" | "nameEn">) {
+  const english = getLang() !== "de" || getEdition() === "en";
+  return (english ? card.nameEn ?? card.nameDe : card.nameDe ?? card.nameEn) ?? tr("Unbenannt");
+}
 
 export function trendClass(n: number | null | undefined) { return n == null ? "" : n > 0.005 ? "up" : n < -0.005 ? "down" : "flat"; }
 

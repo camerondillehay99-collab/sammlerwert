@@ -19,9 +19,33 @@ export interface SqlDb {
   run(sql: string, params?: SqlValue[]): Promise<{ changes: number; lastInsertRowid: number }>;
   /** Run several statements atomically (one transaction) and in order. */
   batch(statements: Statement[]): Promise<void>;
+  /** Run several independent read queries in ONE round trip (D1 batch); results in statement order. */
+  queryMany?(statements: Statement[]): Promise<Row[][]>;
   /** Execute raw multi-statement SQL (schema / DDL). */
   exec(sql: string): Promise<void>;
 }
+
+/** Several reads in a single round trip where the adapter supports it, sequentially otherwise. */
+export async function readMany<T extends Row[][] = Row[][]>(db: SqlDb, statements: Statement[]): Promise<T> {
+  if (!statements.length) return [] as unknown as T;
+  if (db.queryMany) return (await db.queryMany(statements)) as T;
+  const out: Row[][] = [];
+  for (const s of statements) out.push(await db.all(s.sql, s.params));
+  return out as T;
+}
+
+/** Tiny per-isolate memo with TTL for data that changes at most nightly (guide date, factors, stats). */
+const memoStore = new Map<string, { at: number; value: unknown; pending?: Promise<unknown> }>();
+export async function memo<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
+  const hit = memoStore.get(key);
+  const now = Date.now();
+  if (hit && now - hit.at < ttlMs) return hit.value as T;
+  if (hit?.pending) return hit.pending as Promise<T>;
+  const pending = load().then((value) => { memoStore.set(key, { at: Date.now(), value }); return value; }).catch((e) => { memoStore.delete(key); throw e; });
+  memoStore.set(key, { at: hit?.at ?? 0, value: hit?.value, pending });
+  return pending;
+}
+export function memoClear(prefix = "") { for (const k of [...memoStore.keys()]) if (k.startsWith(prefix)) memoStore.delete(k); }
 
 export const MAX_PARAMS = 100; // D1 limit per statement; we honour it everywhere.
 

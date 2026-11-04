@@ -10,9 +10,15 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   });
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new HttpError(res.status, data?.error ?? `Fehler ${res.status}`, data?.code);
+  if (!res.ok) {
+    if (res.status === 401 && !path.startsWith("/api/auth/")) onUnauthorized?.();
+    throw new HttpError(res.status, data?.error ?? `Fehler ${res.status}`, data?.code);
+  }
   return data as T;
 }
+let onUnauthorized: (() => void) | null = null;
+/** Called once when any request answers 401 (session expired while the UI still showed a user). */
+export function setUnauthorizedHandler(fn: () => void) { onUnauthorized = fn; }
 
 const cache = new Map<string, { t: number; v: unknown }>();
 async function cached<T>(path: string, ttlMs = 30_000): Promise<T> {
@@ -82,6 +88,7 @@ export const api = {
   portfolio: () => call<PortfolioSummary>("GET", "/api/portfolio"),
   items: (collectionId?: number | null) => call<{ items: CollectionItem[] }>("GET", `/api/items${collectionId ? `?collection=${collectionId}` : ""}`),
   addItem: (body: Record<string, unknown>) => call<{ item: CollectionItem }>("POST", "/api/items", body),
+  addItems: (body: { items: Array<Record<string, unknown>>; collectionId?: number; source?: string; merge?: boolean }) => call<{ created: number; merged: number; collectionId: number; quantity: number }>("POST", "/api/items/many", body),
   updateItem: (id: number, body: Record<string, unknown>) => call<{ item: CollectionItem }>("PATCH", `/api/items/${id}`, body),
   deleteItem: (id: number) => call<{ ok: true }>("DELETE", `/api/items/${id}`),
   uploadImage: (id: number, file: File) => { const fd = new FormData(); fd.append("image", file); return call<{ imagePath: string }>("POST", `/api/items/${id}/image`, fd); },

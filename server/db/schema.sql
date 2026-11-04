@@ -276,3 +276,11 @@ CREATE TABLE IF NOT EXISTS psa_certs (
   payload TEXT NOT NULL,
   card_id TEXT
 );
+
+-- Machine-translated UI strings for languages beyond German/English (see server/i18n.ts)
+CREATE TABLE IF NOT EXISTS ui_translations (
+  lang TEXT NOT NULL,
+  key TEXT NOT NULL,
+  text TEXT NOT NULL,
+  PRIMARY KEY (lang, key)
+);

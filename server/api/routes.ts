@@ -9,17 +9,29 @@ import { JOB_NAMES, runJob, type JobName } from "../jobs/scheduler.ts";
 import { ebayConfigured } from "../ingest/ebay.ts";
 import { blobStore } from "../storage.ts";
 import { scanAvailable, scanImage } from "../scan.ts";
+import { UI_LANGS, uiDictionary } from "../i18n.ts";
 
 import { add } from "./router.ts";
 export { matchRoute, hasPath } from "./router.ts";
 import { GRADERS, LANGS, VARIANTS, CONDITIONS, resolveVariant } from "./common.ts";
+import { memo } from "../db/adapter.ts";
 import "./auth-routes.ts";
 import "./collection-routes.ts";
 import "./import-routes.ts";
 
 // ---------- meta ----------
-add("GET", "/api/health", async (_r, _p, db) => json({ ok: true, brand: config.brand.name, stats: await catalogStats(db), ebay: ebayConfigured(),
-  ebayInsights: (await db.first<{ value: string }>("SELECT value FROM meta WHERE key = 'ebay_insights'"))?.value ?? null, billing: stripeConfigured(), uploads: !!blobStore(), scan: scanAvailable() }));
+add("GET", "/api/health", async (req, _p, db) => json({ ok: true, brand: config.brand.name, stats: await catalogStats(db), ebay: ebayConfigured(),
+  ebayInsights: await memo("ebay_insights", 300_000, async () => (await db.first<{ value: string }>("SELECT value FROM meta WHERE key = 'ebay_insights'"))?.value ?? null),
+  billing: stripeConfigured(), uploads: !!blobStore(), scan: scanAvailable(), edge: (req as Request & { cf?: { colo?: string } }).cf?.colo ?? null },
+  200, { "cache-control": "public, max-age=60" }));
+
+// ---------- UI translations (languages beyond de/en) ----------
+add("GET", "/api/i18n/:lang", async (_r, p, db) => {
+  const lang = String(p.lang ?? "").toLowerCase();
+  if (!UI_LANGS[lang]) throw notFound("Sprache nicht verfügbar.");
+  const r = await uiDictionary(db, lang);
+  return json({ lang, ...r }, 200, { "cache-control": r.complete ? "public, max-age=3600" : "no-store" });
+});
 
 // ---------- scanner ----------
 const SCAN_MAX_BYTES = 3_000_000;

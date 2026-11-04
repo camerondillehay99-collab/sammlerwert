@@ -44,7 +44,7 @@ add("GET", "/api/auth/me", async (req, _p, db) => {
 add("PATCH", "/api/auth/me", async (req, _p, db) => {
   const u = await requireUser(db, req);
   const b = await readJson<{ name?: string; locale?: string }>(req);
-  await db.run("UPDATE users SET name = COALESCE(?, name), locale = COALESCE(?, locale) WHERE id = ?", [str(b.name, 80), b.locale === "en" || b.locale === "de" ? b.locale : null, u.id]);
+  await db.run("UPDATE users SET name = COALESCE(?, name), locale = COALESCE(?, locale) WHERE id = ?", [str(b.name, 80), b.locale && /^[a-z]{2}$/.test(b.locale) ? b.locale : null, u.id]);
   return json({ user: (await sessionState(db, req))?.user ?? null });
 });
 

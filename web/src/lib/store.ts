@@ -14,12 +14,20 @@ export const state: { user: Me | null; mfa: { step: "setup" | "verify"; email: s
 export function subscribe(fn: Listener) { listeners.add(fn); return () => listeners.delete(fn); }
 function emit() { for (const l of listeners) l(); }
 
-export function setUser(u: Me | null) { state.user = u; if (u) state.mfa = null; emit(); }
+export function setUser(u: Me | null) { state.user = u; if (u) state.mfa = null; rememberUser(u); emit(); }
+
+/** Last known signed-in user, so the app can paint the personalised shell instantly on the next visit while /api/auth/me confirms it. */
+function rememberUser(u: Me | null) { if (u) safeSet("sw-user", JSON.stringify({ id: u.id, email: u.email, name: u.name, plan: u.plan, totpEnabled: u.totpEnabled, isAdmin: u.isAdmin })); else { try { localStorage.removeItem("sw-user"); } catch { /* ignore */ } } }
+export function hydrateUser(): boolean {
+  const raw = safeGet("sw-user");
+  if (!raw) return false;
+  try { state.user = JSON.parse(raw) as Me; return true; } catch { return false; }
+}
 export function setMfa(m: { step: "setup" | "verify"; email: string } | null) { state.mfa = m; emit(); }
 export function setTheme(t: "light" | "dark") { state.theme = t; safeSet("sw-theme", t); document.documentElement.dataset.theme = t; emit(); }
 
 export async function loadUser() {
-  try { const r = await api.me(); state.user = r.user; state.mfa = r.mfa ? { step: r.mfa, email: r.email ?? "" } : null; } catch { state.user = null; state.mfa = null; }
+  try { const r = await api.me(); state.user = r.user; state.mfa = r.mfa ? { step: r.mfa, email: r.email ?? "" } : null; rememberUser(r.user); } catch { /* offline: keep the hydrated user */ }
   state.ready = true; emit();
 }
 

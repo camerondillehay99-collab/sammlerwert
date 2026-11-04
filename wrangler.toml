@@ -6,6 +6,11 @@ compatibility_date = "2026-10-13"
 workers_dev = true
 upload_source_maps = true
 
+# Run the Worker next to the D1 primary instead of next to the visitor: every request makes several
+# database round trips, so this cuts response times dramatically for everyone outside Western Europe.
+[placement]
+mode = "smart"
+
 [assets]
 directory = "./web/public"
 binding = "ASSETS"
@@ -20,6 +25,10 @@ database_id = "08e0e704-3b2c-4884-9318-1b0a249ee37c"
 # Workers AI: card scanner (vision model reads name/number from a photo). Included with the Workers plan.
 [ai]
 binding = "AI"
+
+# Nightly: translate any UI strings still missing for the machine-translated languages (see server/i18n.ts).
+[triggers]
+crons = ["23 3 * * *"]
 
 # R2 (10 GB free): enable R2 once in the dashboard, create bucket "sammlerwert-uploads", then uncomment:
 # [[r2_buckets]]

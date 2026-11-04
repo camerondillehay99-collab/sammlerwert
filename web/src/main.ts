@@ -1,7 +1,9 @@
 import { h, svg, icons } from "./lib/dom.ts";
+import { logoMark, wordmark } from "./lib/logo.ts";
 import { modal } from "./components/ui.ts";
-import { route, startRouter, navigate } from "./lib/router.ts";
-import { state, subscribe, loadUser, setTheme } from "./lib/store.ts";
+import { route, startRouter, navigate, render } from "./lib/router.ts";
+import { state, subscribe, loadUser, setTheme, hydrateUser, setUser } from "./lib/store.ts";
+import { api, invalidate, setUnauthorizedHandler } from "./lib/api.ts";
 import { dashboard } from "./views/dashboard.ts";
 import { search } from "./views/search.ts";
 import { cardView } from "./views/card.ts";
@@ -12,30 +14,31 @@ import { authView, mfaSetupView, mfaVerifyView } from "./views/auth.ts";
 import { scanView } from "./views/scan.ts";
 import { importView } from "./views/import.ts";
 import { sharedView } from "./views/share.ts";
+import { tr, initI18n, onLangChange } from "./lib/i18n.ts";
 
 const BRAND = (document.querySelector('meta[name="application-name"]') as HTMLMetaElement | null)?.content ?? "Sammlerwert";
 document.documentElement.dataset.theme = state.theme;
 
-route("/", dashboard, `${BRAND} – Portfolio`);
-route("/suche", search, `Suche – ${BRAND}`);
-route("/scan", scanView, `Scanner – ${BRAND}`);
-route("/karte/:id", cardView, BRAND);
-route("/sammlung", collection, `Meine Sammlung – ${BRAND}`);
-route("/sets", sets, `Sets – ${BRAND}`);
-route("/sets/:id", setView, BRAND);
-route("/markt", market, `Markt – ${BRAND}`);
-route("/login", authView("login"), `Anmelden – ${BRAND}`);
-route("/registrieren", authView("register"), `Registrieren – ${BRAND}`);
-route("/2fa", mfaVerifyView, `Code eingeben – ${BRAND}`);
-route("/2fa/einrichten", mfaSetupView, `Konto absichern – ${BRAND}`);
-route("/import", importView, `Import – ${BRAND}`);
-route("/watchlist", watchlistView, `Watchlist – ${BRAND}`);
-route("/s/:token", sharedView, `Geteilte Sammlung – ${BRAND}`);
-route("/einstellungen", settings, `Einstellungen – ${BRAND}`);
-route("/tarife", pricing, `Tarife – ${BRAND}`);
-route("/methodik", methodik, `Methodik – ${BRAND}`);
-route("/impressum", legal("impressum"), `Impressum – ${BRAND}`);
-route("/datenschutz", legal("datenschutz"), `Datenschutz – ${BRAND}`);
+route("/", dashboard, () => tr("{BRAND} – Portfolio", { BRAND }));
+route("/suche", search, () => tr("Suche – {BRAND}", { BRAND }));
+route("/scan", scanView, () => tr("Scanner – {BRAND}", { BRAND }));
+route("/karte/:id", cardView, () => BRAND, (p) => { api.card(p.id!).catch(() => {}); });
+route("/sammlung", collection, () => tr("Meine Sammlung – {BRAND}", { BRAND }));
+route("/sets", sets, () => tr("Sets – {BRAND}", { BRAND }), () => { api.sets().catch(() => {}); });
+route("/sets/:id", setView, () => BRAND, (p, q) => { api.set(p.id!, q.get("sort") ?? "number").catch(() => {}); });
+route("/markt", market, () => tr("Markt – {BRAND}", { BRAND }), (_p, q) => { api.movers(q.get("lang") === "en" ? "en" : "de").catch(() => {}); });
+route("/login", authView("login"), () => tr("Anmelden – {BRAND}", { BRAND }));
+route("/registrieren", authView("register"), () => tr("Registrieren – {BRAND}", { BRAND }));
+route("/2fa", mfaVerifyView, () => tr("Code eingeben – {BRAND}", { BRAND }));
+route("/2fa/einrichten", mfaSetupView, () => tr("Konto absichern – {BRAND}", { BRAND }));
+route("/import", importView, () => tr("Import – {BRAND}", { BRAND }));
+route("/watchlist", watchlistView, () => tr("Watchlist – {BRAND}", { BRAND }));
+route("/s/:token", sharedView, () => tr("Geteilte Sammlung – {BRAND}", { BRAND }));
+route("/einstellungen", settings, () => tr("Einstellungen – {BRAND}", { BRAND }));
+route("/tarife", pricing, () => tr("Tarife – {BRAND}", { BRAND }));
+route("/methodik", methodik, () => tr("Methodik – {BRAND}", { BRAND }));
+route("/impressum", legal("impressum"), () => tr("Impressum – {BRAND}", { BRAND }));
+route("/datenschutz", legal("datenschutz"), () => tr("Datenschutz – {BRAND}", { BRAND }));
 
 interface NavItem { href: string; icon: string; label: string; match: (p: string) => boolean; hero?: boolean; desktop?: boolean; mobile?: boolean }
 /** Desktop sidebar and the phone tab bar share one list; the scanner is a phone feature (camera), Sets & Markt move to "Mehr" on the phone. */
@@ -58,39 +61,39 @@ const MORE: Array<{ href: string; icon: string; label: string; sub: string }> = 
 ];
 
 function navLinks(cls: string, where: "desktop" | "mobile") {
-  return NAV.filter((n) => n[where]).map((n) => h("a", { class: `${cls}${n.hero ? " hero" : ""}`, href: n.href, dataset: { nav: n.href } }, svg(n.icon, 20), h("span", null, n.label)));
+  return NAV.filter((n) => n[where]).map((n) => h("a", { class: `${cls}${n.hero ? " hero" : ""}`, href: n.href, dataset: { nav: n.href } }, svg(n.icon, 20), h("span", null, tr(n.label))));
 }
 
 function moreButton(): HTMLElement {
-  const b = h("button", { class: "mnav-item", dataset: { nav: "more" }, "aria-label": "Mehr", onClick: () => openMore() }, svg(icons.more, 20), h("span", null, "Mehr"));
+  const b = h("button", { class: "mnav-item", dataset: { nav: "more" }, "aria-label": tr("Mehr"), onClick: () => openMore() }, svg(icons.more, 20), h("span", null, tr("Mehr")));
   return b;
 }
 
 function openMore() {
-  const body = h("div", { class: "more-grid" }, ...MORE.map((m) => h("a", { class: "more-item", href: m.href }, svg(m.icon, 22), h("span", null, h("strong", null, m.label), h("small", null, m.sub)))));
+  const body = h("div", { class: "more-grid" }, ...MORE.map((m) => h("a", { class: "more-item", href: m.href }, svg(m.icon, 22), h("span", null, h("strong", null, tr(m.label)), h("small", null, tr(m.sub))))));
   const foot = h("div", { class: "more-foot" },
-    h("button", { class: "btn ghost sm", onClick: () => setTheme(state.theme === "dark" ? "light" : "dark") }, svg(state.theme === "dark" ? icons.sun : icons.moon, 16), state.theme === "dark" ? " Hell" : " Dunkel"),
-    h("a", { class: "btn ghost sm", href: "/tarife" }, "Tarife"),
-    state.user ? null : h("a", { class: "btn primary sm", href: "/login" }, "Anmelden"));
-  const close = modal("Mehr", h("div", null, body, foot));
+    h("button", { class: "btn ghost sm", onClick: () => setTheme(state.theme === "dark" ? "light" : "dark") }, svg(state.theme === "dark" ? icons.sun : icons.moon, 16), state.theme === "dark" ? tr(" Hell") : tr(" Dunkel")),
+    h("a", { class: "btn ghost sm", href: "/tarife" }, tr("Tarife")),
+    state.user ? null : h("a", { class: "btn primary sm", href: "/login" }, tr("Anmelden")));
+  const close = modal(tr("Mehr"), h("div", null, body, foot));
   body.addEventListener("click", (e) => { if ((e.target as HTMLElement).closest("a")) close(); });
   foot.addEventListener("click", (e) => { if ((e.target as HTMLElement).closest("a")) close(); });
 }
 
 function shell(): HTMLElement {
   const sidebar = h("aside", { class: "sidebar" },
-    h("a", { class: "brand", href: "/" }, h("span", { class: "brand-mark" }, "S"), h("span", null, h("strong", null, BRAND), h("small", null, "Deutsche Karten. Echte Preise."))),
+    h("a", { class: "brand", href: "/" }, logoMark(36), h("span", null, wordmark(BRAND), h("small", null, tr("Deutsche Karten. Echte Preise.")))),
     h("nav", { class: "nav" }, ...navLinks("nav-item", "desktop")),
-    h("div", { class: "sidebar-foot" }, userBox(), h("p", { class: "foot-links" }, h("a", { href: "/tarife" }, "Tarife"), " · ", h("a", { href: "/methodik" }, "Methodik"), " · ", h("a", { href: "/impressum" }, "Impressum"), " · ", h("a", { href: "/datenschutz" }, "Datenschutz"))),
+    h("div", { class: "sidebar-foot" }, userBox(), h("p", { class: "foot-links" }, h("a", { href: "/tarife" }, tr("Tarife")), " · ", h("a", { href: "/methodik" }, tr("Methodik")), " · ", h("a", { href: "/impressum" }, tr("Impressum")), " · ", h("a", { href: "/datenschutz" }, tr("Datenschutz")))),
   );
   const mobile = h("nav", { class: "mobile-nav" }, ...navLinks("mnav-item", "mobile"), moreButton());
   const main = h("main", { class: "main", id: "outlet" });
-  const topbar = h("header", { class: "topbar" }, h("a", { class: "brand", href: "/" }, h("span", { class: "brand-mark" }, "S"), h("strong", null, BRAND)), h("div", { class: "topbar-actions" }, themeBtn(), userMini()));
+  const topbar = h("header", { class: "topbar" }, h("a", { class: "brand", href: "/" }, logoMark(30), wordmark(BRAND)), h("div", { class: "topbar-actions" }, themeBtn(), userMini()));
   return h("div", { class: "shell" }, sidebar, h("div", { class: "content" }, topbar, main), mobile, h("div", { class: "toast", id: "toast", role: "status", "aria-live": "polite" }));
 }
 
 function themeBtn() {
-  const b = h("button", { class: "icon-btn", "aria-label": "Design wechseln", onClick: () => setTheme(state.theme === "dark" ? "light" : "dark") });
+  const b = h("button", { class: "icon-btn", "aria-label": tr("Design wechseln"), onClick: () => setTheme(state.theme === "dark" ? "light" : "dark") });
   const draw = () => b.replaceChildren(svg(state.theme === "dark" ? icons.sun : icons.moon, 18));
   draw(); subscribe(draw); return b;
 }
@@ -98,20 +101,27 @@ function themeBtn() {
 function userBox(): HTMLElement {
   const box = h("div", { class: "userbox" });
   const draw = () => box.replaceChildren(state.user
-    ? h("a", { class: "userlink", href: "/einstellungen" }, h("span", { class: "avatar" }, (state.user.name ?? state.user.email).slice(0, 1).toUpperCase()), h("span", null, h("strong", null, state.user.name ?? state.user.email.split("@")[0]), h("small", null, { free: "Kostenlos", sammler: "Sammler", pro: "Pro" }[state.user.plan] ?? state.user.plan)), svg(icons.settings, 16))
-    : h("div", { class: "auth-links" }, h("a", { class: "btn primary full", href: "/registrieren" }, "Kostenlos starten"), h("a", { class: "link center", href: "/login" }, "Anmelden")));
+    ? h("a", { class: "userlink", href: "/einstellungen" }, h("span", { class: "avatar" }, (state.user.name ?? state.user.email).slice(0, 1).toUpperCase()), h("span", null, h("strong", null, state.user.name ?? state.user.email.split("@")[0]), h("small", null, { free: tr("Kostenlos"), sammler: tr("Sammler"), pro: tr("Pro") }[state.user.plan] ?? state.user.plan)), svg(icons.settings, 16))
+    : h("div", { class: "auth-links" }, h("a", { class: "btn primary full", href: "/registrieren" }, tr("Kostenlos starten")), h("a", { class: "link center", href: "/login" }, tr("Anmelden"))));
   draw(); subscribe(draw); return box;
 }
 
 function userMini(): HTMLElement {
   const el = h("span");
-  const draw = () => el.replaceChildren(state.user ? h("a", { class: "avatar", href: "/einstellungen", "aria-label": "Konto" }, (state.user.name ?? state.user.email).slice(0, 1).toUpperCase()) : h("a", { class: "btn primary sm", href: "/login" }, "Anmelden"));
+  const draw = () => el.replaceChildren(state.user ? h("a", { class: "avatar", href: "/einstellungen", "aria-label": tr("Konto") }, (state.user.name ?? state.user.email).slice(0, 1).toUpperCase()) : h("a", { class: "btn primary sm", href: "/login" }, tr("Anmelden")));
   draw(); subscribe(draw); return el;
 }
 
 async function boot() {
-  await loadUser();
+  // Paint immediately with the last known user (if any); /api/auth/me confirms in the background and re-renders on change.
+  const hydrated = hydrateUser();
+  await initI18n(state.user?.locale ?? null);
   document.body.replaceChildren(shell());
+  onLangChange(() => { document.body.replaceChildren(shell()); invalidate(); render(); });
+  const userLoad = loadUser();
+  if (!hydrated) await userLoad;
+  else userLoad.then(() => { if (!state.user && !state.mfa) { invalidate(); render(); } });
+  setUnauthorizedHandler(() => { if (state.user) { setUser(null); invalidate(); navigate(`/login?next=${encodeURIComponent(location.pathname)}`); } });
   startRouter(document.getElementById("outlet")!, (path) => {
     document.querySelectorAll<HTMLElement>("[data-nav]").forEach((a) => {
       const n = NAV.find((x) => x.href === a.dataset.nav);

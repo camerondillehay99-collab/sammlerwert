@@ -1,5 +1,7 @@
 // Lightweight SVG charts: line chart with multiple series, sparkline, donut. Theme colours via CSS variables.
 import type { PricePoint } from "../../../shared/types.ts";
+import { crosshair, type ChartPoint } from "./fx.ts";
+import { locale, tr } from "./i18n.ts";
 
 const NS = "http://www.w3.org/2000/svg";
 function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number> = {}): SVGElementTagNameMap[K] {
@@ -16,7 +18,7 @@ export function lineChart(series: Series[], opts: { height?: number; formatY?: (
   const all = series.flatMap((s) => s.points);
   if (all.length < 2 || new Set(all.map((p) => p.date)).size < 2) {
     const t = el("text", { x: W / 2, y: H / 2, "text-anchor": "middle", class: "chart-empty" });
-    t.textContent = opts.emptyText ?? "Noch zu wenige Datenpunkte – die Historie wächst täglich.";
+    t.textContent = opts.emptyText ?? tr("Noch zu wenige Datenpunkte – die Historie wächst täglich.");
     svg.appendChild(t);
     return svg;
   }
@@ -38,11 +40,13 @@ export function lineChart(series: Series[], opts: { height?: number; formatY?: (
   for (let i = 0; i <= ticks; i++) {
     const tms = x0 + ((x1 - x0) * i) / ticks;
     const t = el("text", { x: X(tms), y: H - 8, "text-anchor": i === 0 ? "start" : i === ticks ? "end" : "middle", class: "chart-label" });
-    t.textContent = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "short" }).format(new Date(tms)); svg.appendChild(t);
+    t.textContent = new Intl.DateTimeFormat(locale(), { day: "2-digit", month: "short" }).format(new Date(tms)); svg.appendChild(t);
   }
+  const hover: ChartPoint[] = [];
   series.forEach((s, idx) => {
     const pts = [...s.points].sort((a, b) => a.date.localeCompare(b.date));
     if (pts.length < 1) return;
+    for (const p of pts) hover.push({ x: X(new Date(p.date).getTime()), y: Y(p.value), date: p.date, value: p.value, series: s.name, color: s.color });
     const d = pts.map((p, i) => `${i ? "L" : "M"}${X(new Date(p.date).getTime()).toFixed(1)},${Y(p.value).toFixed(1)}`).join(" ");
     if (idx === 0 && pts.length > 1) {
       const area = el("path", { d: `${d} L${X(new Date(pts[pts.length - 1]!.date).getTime()).toFixed(1)},${Y(y0)} L${X(new Date(pts[0]!.date).getTime()).toFixed(1)},${Y(y0)} Z`, fill: s.color, opacity: 0.08 });
@@ -53,6 +57,7 @@ export function lineChart(series: Series[], opts: { height?: number; formatY?: (
     svg.appendChild(el("circle", { cx: X(new Date(last.date).getTime()), cy: Y(last.value), r: 3.5, fill: s.color }));
     if (pts.length === 1) svg.appendChild(el("circle", { cx: X(new Date(last.date).getTime()), cy: Y(last.value), r: 6, fill: s.color, opacity: 0.25 }));
   });
+  crosshair(svg, hover, fy, { padL, padR, padT, padB, W, H });
   return svg;
 }
 

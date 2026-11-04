@@ -2,7 +2,7 @@ import type { SqlDb } from "../db/adapter.ts";
 import { bulkInsert, runBatches } from "../db/adapter.ts";
 import type { Collection, CollectionItem, Condition, GradingCompany, Insight, Language, PortfolioSummary, PriceQuote, Variant } from "../../shared/types.ts";
 import { CONDITION_MULT, GRADE_MULT, gradeMultiplier } from "../pricing/engine.ts";
-import { getCardSummaries, quotesFor } from "./catalog.ts";
+import { getCardSummariesWithQuotes } from "./catalog.ts";
 import { today } from "../db/index.ts";
 
 interface ItemRow { id: number; collection_id: number; card_id: string; language: string; variant: string; condition: string; grading_company: string | null; grade: number | null; cert_no: string | null; quantity: number; purchase_price_eur: number | null; purchased_at: string | null; notes: string | null; image_path: string | null; created_at: string; source?: string | null }
@@ -25,13 +25,16 @@ export async function defaultCollectionId(db: SqlDb, userId: number): Promise<nu
 
 interface CollectionRow { id: number; name: string; is_default: number; description: string | null; color: string | null; share_token: string | null; sort_order: number; created_at: string; item_count: number; quantity: number }
 export async function listCollections(db: SqlDb, userId: number): Promise<Collection[]> {
-  await defaultCollectionId(db, userId);
-  return (await db.all<CollectionRow>(`SELECT c.*, (SELECT COUNT(*) FROM collection_items i WHERE i.collection_id = c.id) item_count, (SELECT COALESCE(SUM(quantity),0) FROM collection_items i WHERE i.collection_id = c.id) quantity
-    FROM collections c WHERE c.user_id = ? ORDER BY c.is_default DESC, c.sort_order, c.id`, [userId])).map((c) => ({
-    id: c.id, name: c.name, isDefault: !!c.is_default, description: c.description, color: c.color, shareToken: c.share_token, sortOrder: c.sort_order, createdAt: c.created_at, itemCount: c.item_count, quantity: c.quantity,
-  }));
+  const rows = await db.all<CollectionRow>(COLLECTIONS_SQL, [userId]);
+  if (rows.length) return rows.map(collectionOut);
+  await defaultCollectionId(db, userId); // brand-new account: create "Meine Sammlung" once
+  return (await db.all<CollectionRow>(COLLECTIONS_SQL, [userId])).map(collectionOut);
 }
-
+const COLLECTIONS_SQL = `SELECT c.*, (SELECT COUNT(*) FROM collection_items i WHERE i.collection_id = c.id) item_count, (SELECT COALESCE(SUM(quantity),0) FROM collection_items i WHERE i.collection_id = c.id) quantity
+    FROM collections c WHERE c.user_id = ? ORDER BY c.is_default DESC, c.sort_order, c.id`;
+const collectionOut = (c: CollectionRow): Collection => ({
+  id: c.id, name: c.name, isDefault: !!c.is_default, description: c.description, color: c.color, shareToken: c.share_token, sortOrder: c.sort_order, createdAt: c.created_at, itemCount: c.item_count, quantity: c.quantity,
+});
 export async function ownedCollection(db: SqlDb, userId: number, id: number): Promise<Collection | null> {
   if (!Number.isInteger(id)) return null;
   return (await listCollections(db, userId)).find((c) => c.id === id) ?? null;
@@ -45,8 +48,7 @@ export async function listItems(db: SqlDb, userId: number, collectionId?: number
 }
 
 export async function hydrate(db: SqlDb, rows: ItemRow[]): Promise<CollectionItem[]> {
-  const cards = await getCardSummaries(db, rows.map((r) => r.card_id));
-  const quotes = await quotesFor(db, rows.map((r) => r.card_id));
+  const { cards, quotes } = await getCardSummariesWithQuotes(db, rows.map((r) => r.card_id));
   return rows.map((r) => {
     const card = cards.get(r.card_id)!;
     // Fallback chain: exact language/variant → same language normal → English normal

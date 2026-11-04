@@ -18,7 +18,7 @@ function fakeD1(): D1DatabaseLike & { raw: Database } {
   return {
     raw,
     prepare: (sql: string) => prep(sql),
-    batch: async (stmts) => { raw.transaction(() => { for (const s of stmts as unknown as Array<{ sql: string; params: unknown[] }>) raw.query(s.sql).run(...(s.params as never[])); })(); return []; },
+    batch: async (stmts) => { const out: unknown[] = []; raw.transaction(() => { for (const s of stmts as unknown as Array<{ sql: string; params: unknown[] }>) { const q = raw.query(s.sql); if (/^\s*(SELECT|WITH|PRAGMA)/i.test(s.sql)) out.push({ results: q.all(...(s.params as never[])) }); else { q.run(...(s.params as never[])); out.push({ results: [] }); } } })(); return out as never; },
     exec: async (sql: string) => { let n = 0; for (const line of sql.split("\n")) { if (line.trim()) { raw.exec(line); n++; } } return { count: n, duration: 0 }; },
   };
 }
@@ -26,8 +26,9 @@ function fakeD1(): D1DatabaseLike & { raw: Database } {
 const DB = fakeD1();
 const env = { DB, ASSETS: { fetch: async () => new Response("<html>spa</html>", { headers: { "content-type": "text/html" } }) }, BRAND_NAME: "Sammlerwert", ADMIN_EMAILS: "admin@example.com" };
 let cookie = "";
+const ctx = { waitUntil: (p: Promise<unknown>) => { void p; } };
 const call = async (method: string, path: string, body?: unknown) => {
-  const res = await worker.fetch(new Request(`https://sammlerwert.example${path}`, { method, headers: { "content-type": "application/json", cookie }, body: body === undefined ? undefined : JSON.stringify(body) }), env);
+  const res = await worker.fetch(new Request(`https://sammlerwert.example${path}`, { method, headers: { "content-type": "application/json", cookie }, body: body === undefined ? undefined : JSON.stringify(body) }), env, ctx);
   const sc = res.headers.get("set-cookie"); if (sc) cookie = sc.split(";")[0]!;
   return { status: res.status, body: res.headers.get("content-type")?.includes("json") ? await res.json() : await res.text() };
 };
@@ -48,7 +49,7 @@ beforeAll(async () => {
 
 describe("worker", () => {
   test("schema applies through D1 exec (FTS5, defaults) and SPA falls through to assets", async () => {
-    const r = await worker.fetch(new Request("https://sammlerwert.example/karte/sv03.5-199"), env);
+    const r = await worker.fetch(new Request("https://sammlerwert.example/karte/sv03.5-199"), env, ctx);
     expect(await r.text()).toContain("spa");
   });
   test("cron reprice + API end to end on D1 semantics", async () => {

@@ -1,6 +1,6 @@
 import { gradedValues } from "../pricing/engine.ts";
 import type { SqlDb } from "../db/adapter.ts";
-import { chunks, placeholders } from "../db/adapter.ts";
+import { chunks, placeholders, memo, readMany, stmt } from "../db/adapter.ts";
 import type { CardDetail, CardSummary, CardmarketGuidePoint, Language, PriceQuote, SaleRecord, SetSummary, Variant } from "../../shared/types.ts";
 import { jsonOr } from "../db/index.ts";
 import { cardHistory, quoteCards, type CardForQuote, type QuoteMap } from "../pricing/quotes.ts";
@@ -37,12 +37,8 @@ async function summaries(db: SqlDb, rows: CardRow[], withQuotes = true): Promise
   return rows.map((r) => rowToSummary(r, quotes));
 }
 
-let ftsReadyCache: { at: number; ready: boolean } | null = null;
 async function ftsReady(db: SqlDb): Promise<boolean> {
-  if (ftsReadyCache?.ready || (ftsReadyCache && Date.now() - ftsReadyCache.at < 60_000)) return ftsReadyCache.ready;
-  const ready = ((await db.first<{ n: number }>("SELECT COUNT(*) n FROM cards_fts"))?.n ?? 0) > 0;
-  ftsReadyCache = { at: Date.now(), ready };
-  return ready;
+  return memo("fts_ready", 600_000, async () => !!(await db.first<{ n: number }>("SELECT 1 n FROM cards_fts LIMIT 1")));
 }
 
 /** Build an FTS5 prefix query from free text: "glurak 199" → "glurak"* "199"* */
@@ -71,17 +67,24 @@ export async function searchCards(db: SqlDb, q: string, opts: { setId?: string |
     newest: "s.release_date DESC, CAST(c.local_id AS INTEGER)", trend: "guide_trend30 DESC NULLS LAST",
     relevance: "(guide_value IS NULL), s.release_date DESC, CAST(c.local_id AS INTEGER)",
   } as Record<string, string>)[opts.sort ?? "relevance"] ?? "s.release_date DESC";
-  const rows = await db.all<CardRow>(`${CARD_SELECT} ${whereSql} ORDER BY ${order} LIMIT ? OFFSET ?`, [...params, limit, offset]);
-  const total = (await db.first<{ n: number }>(`SELECT COUNT(*) n FROM cards c ${whereSql}`, params))?.n ?? 0;
+  const [rows, totals] = await readMany(db, [stmt(`${CARD_SELECT} ${whereSql} ORDER BY ${order} LIMIT ? OFFSET ?`, ...params, limit, offset), stmt(`SELECT COUNT(*) n FROM cards c ${whereSql}`, ...params)]) as unknown as [CardRow[], { n: number }[]];
+  const total = totals[0]?.n ?? 0;
   return { items: await summaries(db, rows, opts.withQuotes ?? rows.length <= 60), total };
 }
 
 export async function getCardSummaries(db: SqlDb, ids: string[]): Promise<Map<string, CardSummary>> {
-  const out = new Map<string, CardSummary>();
-  const rows: CardRow[] = [];
-  for (const chunk of chunks([...new Set(ids)], 90)) rows.push(...(await db.all<CardRow>(`${CARD_SELECT} WHERE c.id IN (${placeholders(chunk.length)})`, chunk)));
-  for (const s of await summaries(db, rows)) out.set(s.id, s);
-  return out;
+  return (await getCardSummariesWithQuotes(db, ids)).cards;
+}
+
+/** Summaries plus the full quote map (all languages/variants) – one pricing pass serves both. */
+export async function getCardSummariesWithQuotes(db: SqlDb, ids: string[]): Promise<{ cards: Map<string, CardSummary>; quotes: QuoteMap }> {
+  const cards = new Map<string, CardSummary>();
+  const uniq = [...new Set(ids)];
+  if (!uniq.length) return { cards, quotes: new Map() };
+  const rows = (await readMany(db, chunks(uniq, 90).map((chunk) => stmt(`${CARD_SELECT} WHERE c.id IN (${placeholders(chunk.length)})`, ...chunk)))).flat() as unknown as CardRow[];
+  const { quotes } = await quoteCards(db, rows);
+  for (const r of rows) cards.set(r.id, rowToSummary(r, quotes));
+  return { cards, quotes };
 }
 
 /** Quotes for arbitrary card ids (used by portfolio). */
@@ -92,17 +95,22 @@ export async function quotesFor(db: SqlDb, ids: string[]): Promise<QuoteMap> {
 }
 
 export async function getCardDetail(db: SqlDb, id: string): Promise<CardDetail | null> {
-  const row = await db.first<CardRow>(`${CARD_SELECT} WHERE c.id = ?`, [id]);
+  // Card row, detail columns and sales in one round trip; pricing inputs in a second one.
+  const [rows, extras, saleRows] = await readMany(db, [
+    stmt(`${CARD_SELECT} WHERE c.id = ?`, id),
+    stmt("SELECT hp, types, dex_ids, illustrator, cm_match_method, cm_match_confidence FROM cards WHERE id = ?", id),
+    stmt("SELECT * FROM sales WHERE card_id = ? ORDER BY sold_at DESC LIMIT 100", id),
+  ]);
+  const row = rows[0] as unknown as CardRow | undefined;
   if (!row) return null;
-  const extra = (await db.first<{ hp: number | null; types: string | null; dex_ids: string | null; illustrator: string | null; cm_match_method: string | null; cm_match_confidence: number | null }>(
-    "SELECT hp, types, dex_ids, illustrator, cm_match_method, cm_match_confidence FROM cards WHERE id = ?", [id]))!;
+  const extra = extras[0] as unknown as { hp: number | null; types: string | null; dex_ids: string | null; illustrator: string | null; cm_match_method: string | null; cm_match_confidence: number | null };
   const { quotes, guideByProduct } = await quoteCards(db, [row]);
   const prices: PriceQuote[] = [...new Map([...quotes].filter(([k]) => !k.endsWith("|*")).map(([k, q]) => [k, q])).values()].sort((a, b) => a.language.localeCompare(b.language) || a.variant.localeCompare(b.variant));
   const g = row.cm_product_id != null ? guideByProduct.get(row.cm_product_id) : undefined;
   const guide: CardmarketGuidePoint | null = g ? { date: g.date, avg: g.avg, low: g.low, trend: g.trend, avg1: g.avg1, avg7: g.avg7, avg30: g.avg30,
     foilAvg: g.foil_avg, foilLow: g.foil_low, foilTrend: g.foil_trend, foilAvg1: g.foil_avg1, foilAvg7: g.foil_avg7, foilAvg30: g.foil_avg30 } : null;
   const base = rowToSummary(row, quotes);
-  const sales = await getSales(db, id, 100);
+  const sales = (saleRows as unknown as SaleRow[]).map(saleToRecord);
   const raw = quotes.get(`${id}|de|*`)?.value ?? quotes.get(`${id}|en|*`)?.value ?? null;
   const graded = gradedValues(sales.filter((s) => s.gradingCompany && s.grade != null).map((s) => ({ price: s.priceEur, soldAt: s.soldAt, company: s.gradingCompany!, grade: s.grade!, verified: s.verified })), raw);
   return {
@@ -121,15 +129,21 @@ export function cardmarketSearchUrl(name: string): string {
 
 interface SaleRow { id: number; card_id: string; language: string; variant: string; condition: string | null; grading_company: string | null; grade: number | null; price_eur: number; shipping_eur: number | null; sold_at: string; source: string; title: string | null; url: string | null; verified: number }
 export async function getSales(db: SqlDb, cardId: string, limit = 50): Promise<SaleRecord[]> {
-  return (await db.all<SaleRow>("SELECT * FROM sales WHERE card_id = ? ORDER BY sold_at DESC LIMIT ?", [cardId, limit])).map((s) => ({
+  return (await db.all<SaleRow>("SELECT * FROM sales WHERE card_id = ? ORDER BY sold_at DESC LIMIT ?", [cardId, limit])).map(saleToRecord);
+}
+function saleToRecord(s: SaleRow): SaleRecord {
+  return {
     id: s.id, cardId: s.card_id, language: s.language as Language, variant: s.variant as Variant, condition: s.condition as SaleRecord["condition"],
     gradingCompany: s.grading_company as SaleRecord["gradingCompany"], grade: s.grade, priceEur: s.price_eur, shippingEur: s.shipping_eur, soldAt: s.sold_at,
     source: s.source as SaleRecord["source"], title: s.title, url: s.url, verified: !!s.verified,
-  }));
+  };
 }
 
 interface SetRow { id: string; series_id: string | null; series_name: string | null; name_de: string | null; name_en: string | null; abbreviation: string | null; release_date: string | null; card_count_official: number | null; card_count_total: number | null; logo: string | null; symbol: string | null; cards_loaded: number }
 export async function listSets(db: SqlDb): Promise<SetSummary[]> {
+  return memo("sets_list", 300_000, () => listSetsUncached(db));
+}
+async function listSetsUncached(db: SqlDb): Promise<SetSummary[]> {
   return (await db.all<SetRow>(`SELECT s.*, se.name_de AS series_name, (SELECT COUNT(*) FROM cards c WHERE c.set_id = s.id) cards_loaded
     FROM sets s LEFT JOIN series se ON se.id = s.series_id ORDER BY s.release_date DESC NULLS LAST, s.id DESC`)).map((s) => ({
     id: s.id, seriesId: s.series_id, seriesName: s.series_name, nameDe: s.name_de, nameEn: s.name_en, abbreviation: s.abbreviation, releaseDate: s.release_date,
@@ -159,6 +173,9 @@ export async function marketMovers(db: SqlDb, opts: { language?: Language; direc
 }
 
 export async function catalogStats(db: SqlDb) {
+  return memo("catalog_stats", 300_000, () => catalogStatsUncached(db));
+}
+async function catalogStatsUncached(db: SqlDb) {
   const r = (await db.first<Record<string, number | string | null>>(`SELECT
     (SELECT COUNT(*) FROM sets) sets, (SELECT COUNT(*) FROM cards) cards, (SELECT COUNT(*) FROM cards WHERE detail_loaded = 1) cardsDetailed,
     (SELECT COUNT(*) FROM cards WHERE cm_product_id IS NOT NULL) cardsMatched, (SELECT COUNT(*) FROM cm_products) cmProducts,

@@ -3,15 +3,18 @@ import { h, fmt, cardName, imgOr } from "../lib/dom.ts";
 import { api } from "../lib/api.ts";
 import { state } from "../lib/store.ts";
 import { cardTile, empty, section } from "../components/ui.ts";
+import { reveal } from "../lib/fx.ts";
+import { tr } from "../lib/i18n.ts";
 
 export async function sets(): Promise<HTMLElement> {
   const all = (await api.sets()).items.filter((s) => s.cardsLoaded > 0 || (s.cardCountOfficial ?? 0) > 0);
   const owned = state.user ? await ownedBySet() : new Map<string, Set<string>>();
   const groups = new Map<string, SetSummary[]>();
-  for (const s of all) { const k = s.seriesName ?? "Weitere"; (groups.get(k) ?? groups.set(k, []).get(k)!).push(s); }
-  const root = h("div", { class: "page" }, h("header", { class: "page-head" }, h("div", null, h("p", { class: "eyebrow" }, "Katalog"), h("h1", null, "Sets"))));
+  for (const s of all) { const k = s.seriesName ?? tr("Weitere"); (groups.get(k) ?? groups.set(k, []).get(k)!).push(s); }
+  const root = h("div", { class: "page" }, h("header", { class: "page-head" }, h("div", null, h("p", { class: "eyebrow" }, tr("Katalog")), h("h1", null, tr("Sets")))));
   for (const [name, list] of groups) {
-    root.append(section(name, h("div", { class: "set-grid" }, ...list.map((s) => setCard(s, owned.get(s.id)?.size ?? 0)))));
+    const grid = h("div", { class: "set-grid" }, ...list.map((s) => setCard(s, owned.get(s.id)?.size ?? 0)));
+    root.append(section(name, grid)); reveal(grid, ".set-card", 18);
   }
   return root;
 }
@@ -31,24 +34,25 @@ export async function setView(params: Record<string, string>, query: URLSearchPa
   const { set, cards } = await api.set(params.id!, sort);
   const owned = state.user ? (await ownedBySet()).get(set.id) ?? new Set<string>() : new Set<string>();
   const total = cards.reduce((s, c) => s + (c.valueDe ?? 0), 0);
-  const sortSel = h("select", null, ...[["number", "Nummer"], ["value", "Wert ↓"], ["trend", "Trend ↓"], ["name", "Name"]].map(([v, t]) => h("option", { value: v, selected: v === sort }, t)));
+  const sortSel = h("select", null, ...[["number", tr("Nummer")], ["value", tr("Wert ↓")], ["trend", tr("Trend ↓")], ["name", tr("Name")]].map(([v, t]) => h("option", { value: v, selected: v === sort }, t)));
   sortSel.addEventListener("change", () => { location.href = `/sets/${encodeURIComponent(set.id)}?sort=${sortSel.value}`; });
-  const onlyMissing = h("label", { class: "check" }, h("input", { type: "checkbox" }), " nur fehlende");
+  const onlyMissing = h("label", { class: "check" }, h("input", { type: "checkbox" }), tr(" nur fehlende"));
   const grid = h("div", { class: "tiles" });
   const draw = () => {
     const miss = (onlyMissing.firstChild as HTMLInputElement).checked;
     grid.replaceChildren(...cards.filter((c) => !miss || !owned.has(c.id)).map((c) => { const t = cardTile(c); if (owned.has(c.id)) t.classList.add("owned"); return t; }));
-    if (!grid.children.length) grid.appendChild(empty("Komplett!", "Du besitzt jede Karte dieses Sets."));
+    reveal(grid, ".tile");
+    if (!grid.children.length) grid.appendChild(empty(tr("Komplett!"), tr("Du besitzt jede Karte dieses Sets.")));
   };
   onlyMissing.addEventListener("change", draw);
   draw();
   return h("div", { class: "page" },
     h("header", { class: "page-head" },
-      h("div", null, h("p", { class: "eyebrow" }, h("a", { href: "/sets" }, "Sets"), ` · ${set.seriesName ?? ""}`), h("h1", null, set.nameDe ?? set.nameEn ?? set.id),
+      h("div", null, h("p", { class: "eyebrow" }, h("a", { href: "/sets" }, tr("Sets")), ` · ${set.seriesName ?? ""}`), h("h1", null, set.nameDe ?? set.nameEn ?? set.id),
         h("p", { class: "muted" }, `${set.releaseDate ? fmt.date(set.releaseDate) + " · " : ""}${set.cardCountOfficial ?? cards.length} Karten${set.abbreviation ? ` · ${set.abbreviation}` : ""} · Gesamtwert aller Karten (DE): ${fmt.eurCompact(total)}`)),
       set.logo ? h("img", { class: "set-hero-logo", src: `${set.logo}.webp`, alt: "" }) : null),
-    state.user ? h("div", { class: "stats compact" }, h("div", { class: "stat" }, h("span", { class: "stat-title" }, "Im Besitz"), h("strong", { class: "stat-value" }, `${owned.size} / ${set.cardCountOfficial ?? cards.length}`)),
-      h("div", { class: "stat" }, h("span", { class: "stat-title" }, "Fortschritt"), h("strong", { class: "stat-value" }, `${Math.round((owned.size / Math.max(1, set.cardCountOfficial ?? cards.length)) * 100)} %`))) : null,
+    state.user ? h("div", { class: "stats compact" }, h("div", { class: "stat" }, h("span", { class: "stat-title" }, tr("Im Besitz")), h("strong", { class: "stat-value" }, `${owned.size} / ${set.cardCountOfficial ?? cards.length}`)),
+      h("div", { class: "stat" }, h("span", { class: "stat-title" }, tr("Fortschritt")), h("strong", { class: "stat-value" }, `${Math.round((owned.size / Math.max(1, set.cardCountOfficial ?? cards.length)) * 100)} %`))) : null,
     h("div", { class: "search-bar" }, sortSel, state.user ? onlyMissing : null),
     grid,
   );

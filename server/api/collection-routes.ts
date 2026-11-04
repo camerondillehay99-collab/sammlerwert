@@ -135,6 +135,38 @@ add("POST", "/api/items", async (req, _p, db) => {
   return json({ item: await itemById(db, res.lastInsertRowid) }, 201);
 });
 
+/** Several cards in one request (scanner tray, quick-add): identical rows merge into quantity. */
+add("POST", "/api/items/many", async (req, _p, db) => {
+  const u = await requireUser(db, req);
+  const b = await readJson<{ items?: Array<Record<string, unknown>>; collectionId?: number; source?: string; merge?: boolean }>(req);
+  const rows = Array.isArray(b.items) ? b.items.slice(0, 200) : [];
+  if (!rows.length) throw badRequest("Keine Karten übergeben.");
+  const ids = [...new Set(rows.map((r) => str(r.cardId, 40)).filter((x): x is string => !!x))];
+  const known = await getCardSummaries(db, ids);
+  const wanted = rows.filter((r) => known.has(String(r.cardId)));
+  if (!wanted.length) throw badRequest("Unbekannte Karten.");
+  const total = wanted.reduce((n, r) => n + Math.max(1, Math.min(999, Math.round(num(r.quantity) ?? 1))), 0);
+  await assertItemBudget(db, u.id, u.plan, total);
+  const collectionId = b.collectionId != null && (await ownedCollection(db, u.id, Number(b.collectionId))) ? Number(b.collectionId) : await defaultCollectionId(db, u.id);
+  const source = sourceOf(b.source) ?? "scan";
+  const merge = b.merge !== false;
+  const created: number[] = []; let merged = 0;
+  for (const r of wanted) {
+    const cardId = String(r.cardId);
+    const language = oneOf(r.language, LANGS, "de"), variant = await resolveVariant(db, cardId, oneOf(r.variant, VARIANTS, "normal")), condition = oneOf(r.condition, CONDITIONS, "NM");
+    const grader = r.gradingCompany ? oneOf(r.gradingCompany, GRADERS, "OTHER") : null;
+    const grade = grader ? num(r.grade) : null, certNo = grader ? str(r.certNo, 40) : null;
+    const qty = Math.max(1, Math.min(999, Math.round(num(r.quantity) ?? 1)));
+    const same = merge && !certNo ? await db.first<{ id: number }>(`SELECT id FROM collection_items WHERE collection_id = ? AND card_id = ? AND language = ? AND variant = ? AND condition = ? AND COALESCE(grading_company,'') = ? AND COALESCE(grade,-1) = ? LIMIT 1`,
+      [collectionId, cardId, language, variant, condition, grader ?? "", grade ?? -1]) : null;
+    if (same) { await db.run("UPDATE collection_items SET quantity = quantity + ?, updated_at = ? WHERE id = ?", [qty, new Date().toISOString(), same.id]); merged++; continue; }
+    const res = await db.run(`INSERT INTO collection_items(collection_id, card_id, language, variant, condition, grading_company, grade, cert_no, quantity, purchase_price_eur, purchased_at, notes, source)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [collectionId, cardId, language, variant, condition, grader, grade, certNo, qty, num(r.purchasePriceEur), str(r.purchasedAt, 30), str(r.notes, 1000), source]);
+    created.push(res.lastInsertRowid);
+  }
+  return json({ created: created.length, merged, collectionId, quantity: total }, 201);
+});
+
 add("PATCH", "/api/items/:id", async (req, p, db) => {
   const u = await requireUser(db, req);
   const row = await db.first<{ id: number; card_id: string; quantity: number }>("SELECT i.id, i.card_id, i.quantity FROM collection_items i JOIN collections c ON c.id = i.collection_id WHERE i.id = ? AND c.user_id = ?", [Number(p.id), u.id]);

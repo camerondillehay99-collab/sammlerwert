@@ -1,0 +1,46 @@
+// Brand mark (same artwork as /icons/icon.svg) for inline use, plus the two-tone wordmark.
+import { h } from "./dom.ts";
+
+const MARK = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" >
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffa03f"/>
+      <stop offset="1" stop-color="#e5701a"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b1d0b"/>
+      <stop offset="1" stop-color="#130c03"/>
+    </linearGradient>
+  </defs>
+  <rect  rx="15" fill="url(#g)"/>
+  <!-- back card (fanned) -->
+  <g transform="rotate(-14 27 31)">
+    <rect x="16" y="15" width="22" height="31" rx="3.5" fill="#1a1206" opacity=".2"/>
+    <rect x="16" y="15" width="22" height="31" rx="3.5" fill="none" stroke="#fff" stroke-opacity=".45" stroke-width="1.6"/>
+  </g>
+  <!-- front card -->
+  <g transform="rotate(8 36 30)">
+    <rect x="25" y="13.5" width="22" height="31" rx="3.5" fill="url(#card)"/>
+    <rect x="25" y="13.5" width="22" height="31" rx="3.5" fill="none" stroke="#fff" stroke-opacity=".18" stroke-width="1.2"/>
+    <rect x="28" y="16.5" width="16" height="12.5" rx="1.8" fill="#ffb15a" opacity=".85"/>
+    <rect x="28" y="32" width="9" height="2" rx="1" fill="#fff" opacity=".5"/>
+    <rect x="28" y="36.5" width="14" height="2" rx="1" fill="#fff" opacity=".25"/>
+  </g>
+  <!-- rising value line with arrow head -->
+  <path d="M10 52 L22 41 L30 45.5 L49 25.5" fill="none" stroke="#120b02" stroke-opacity=".28" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M10 52 L22 41 L30 45.5 L49 25.5" fill="none" stroke="#fff" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M39.5 24.5 H50 V35" fill="none" stroke="#fff" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`;
+
+/** Fanned cards with a rising value line – the Sammlerwert mark. */
+export function logoMark(size = 34): HTMLElement {
+  const el = h("span", { class: "brand-mark", style: { width: `${size}px`, height: `${size}px` }, "aria-hidden": "true" });
+  el.innerHTML = MARK;
+  return el;
+}
+
+/** "Sammler" + accented "wert". */
+export function wordmark(brand: string): HTMLElement {
+  const i = brand.toLowerCase().indexOf("wert");
+  return i > 0 ? h("strong", { class: "wordmark" }, brand.slice(0, i), h("em", null, brand.slice(i))) : h("strong", { class: "wordmark" }, brand);
+}

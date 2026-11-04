@@ -5,7 +5,7 @@
  * Designed for D1's free tier: reads are cheap (5M rows/day), writes are scarce (100k rows/day).
  */
 import type { SqlDb } from "../db/adapter.ts";
-import { chunks, placeholders } from "../db/adapter.ts";
+import { chunks, placeholders, memo, readMany, stmt, type Statement } from "../db/adapter.ts";
 import type { Language, PriceQuote, PricePoint, Variant } from "../../shared/types.ts";
 import { computeQuote, guideAnchor, primaryVariant, type GuideInput, type ListingInput, type SaleInput } from "./engine.ts";
 import { nowIso } from "../db/index.ts";
@@ -42,38 +42,43 @@ export async function quoteCards(db: SqlDb, cards: CardForQuote[], languages: La
   const quotes: QuoteMap = new Map();
   const guideByProduct = new Map<number, GuideRow>();
   if (!cards.length) return { quotes, guideByProduct, guideDate: null };
-  const guideDate = (await db.first<{ value: string }>("SELECT value FROM meta WHERE key = 'cm_guide_date'"))?.value ?? null;
+  // The guide date changes once a night: memoised per isolate so it costs no round trip on the hot path.
+  const guideDate = await memo("cm_guide_date", 120_000, async () => (await db.first<{ value: string }>("SELECT value FROM meta WHERE key = 'cm_guide_date'"))?.value ?? null);
   const productIds = [...new Set(cards.map((c) => c.cm_product_id).filter((p): p is number => p != null))];
   const ids = cards.map((c) => c.id);
 
-  // Latest guide rows + the rows from ~7 and ~30 days ago (for trends), in one query per chunk.
+  // Every input (guide rows for today/-7d/-30d, sales, listings, language factors) goes out in ONE round trip.
+  const stmts: Statement[] = [];
+  const guideStmts = guideDate ? chunks(productIds, 90).map((ch) => stmt(`SELECT * FROM cm_price_guide WHERE id_product IN (${placeholders(ch.length)}) AND date IN (
+          ?, (SELECT MAX(date) FROM cm_price_guide WHERE date <= date(?, '-7 days')), (SELECT MAX(date) FROM cm_price_guide WHERE date <= date(?, '-30 days')))`, ...ch, guideDate, guideDate, guideDate)) : [];
+  const salesStmts = chunks(ids, 90).map((ch) => stmt(`SELECT card_id, language, variant, price_eur, sold_at, condition, verified, source FROM sales WHERE grade IS NULL AND sold_at >= date('now', '-120 days') AND card_id IN (${placeholders(ch.length)})`, ...ch));
+  const listingStmts = chunks(ids, 90).map((ch) => stmt(`SELECT card_id, language, variant, price_eur, seen_at, condition FROM listings WHERE seen_at >= date('now', '-14 days') AND card_id IN (${placeholders(ch.length)})`, ...ch));
+  const setIds = [...new Set([...cards.map((c) => c.set_id), "*"])];
+  const factorStmts = chunks(setIds, 95).map((ch) => stmt(`SELECT set_id, language, factor, n FROM language_factors WHERE set_id IN (${placeholders(ch.length)})`, ...ch));
+  stmts.push(...guideStmts, ...salesStmts, ...listingStmts, ...factorStmts);
+  const results = await readMany(db, stmts);
+  let at = 0;
+  const take = (n: number) => results.slice(at, (at += n)).flat();
+
   const past7 = new Map<number, GuideRow>(), past30 = new Map<number, GuideRow>();
-  if (guideDate && productIds.length) {
-    for (const ch of chunks(productIds, 90)) {
-      const rows: GuideRow[] = await db.all<GuideRow>(`SELECT * FROM cm_price_guide WHERE id_product IN (${placeholders(ch.length)}) AND date IN (
-          ?, (SELECT MAX(date) FROM cm_price_guide WHERE date <= date(?, '-7 days')), (SELECT MAX(date) FROM cm_price_guide WHERE date <= date(?, '-30 days')))`,
-        [...ch, guideDate, guideDate, guideDate]);
-      for (const r of rows) {
-        if (r.date === guideDate) guideByProduct.set(r.id_product, r);
-        else { const d = daysBetween(r.date, guideDate); if (d >= 25) past30.set(r.id_product, r); else if (d >= 5) past7.set(r.id_product, r); }
-      }
-    }
+  for (const r of take(guideStmts.length) as unknown as GuideRow[]) {
+    if (r.date === guideDate) guideByProduct.set(r.id_product, r);
+    else if (guideDate) { const d = daysBetween(r.date, guideDate); if (d >= 25) past30.set(r.id_product, r); else if (d >= 5) past7.set(r.id_product, r); }
   }
   type SRow = { card_id: string; language: string; variant: string; price_eur: number; sold_at: string; condition: string | null; verified: number; source: string };
   const salesBy = new Map<string, SaleInput[]>();
   type LRow = { card_id: string; language: string; variant: string; price_eur: number; seen_at: string; condition: string | null };
   const listingsBy = new Map<string, ListingInput[]>();
-  for (const ch of chunks(ids, 90)) {
-    for (const s of await db.all<SRow>(`SELECT card_id, language, variant, price_eur, sold_at, condition, verified, source FROM sales WHERE grade IS NULL AND sold_at >= date('now', '-120 days') AND card_id IN (${placeholders(ch.length)})`, ch)) {
-      const k = `${s.card_id}|${s.language}|${s.variant}`;
-      (salesBy.get(k) ?? salesBy.set(k, []).get(k)!).push({ price: s.price_eur, soldAt: s.sold_at, condition: s.condition, verified: !!s.verified, source: s.source });
-    }
-    for (const l of await db.all<LRow>(`SELECT card_id, language, variant, price_eur, seen_at, condition FROM listings WHERE seen_at >= date('now', '-14 days') AND card_id IN (${placeholders(ch.length)})`, ch)) {
-      const k = `${l.card_id}|${l.language}|${l.variant}`;
-      (listingsBy.get(k) ?? listingsBy.set(k, []).get(k)!).push({ price: l.price_eur, seenAt: l.seen_at, condition: l.condition });
-    }
+  for (const s of take(salesStmts.length) as unknown as SRow[]) {
+    const k = `${s.card_id}|${s.language}|${s.variant}`;
+    (salesBy.get(k) ?? salesBy.set(k, []).get(k)!).push({ price: s.price_eur, soldAt: s.sold_at, condition: s.condition, verified: !!s.verified, source: s.source });
   }
-  const factors = await loadFactors(db, [...new Set(cards.map((c) => c.set_id))]);
+  for (const l of take(listingStmts.length) as unknown as LRow[]) {
+    const k = `${l.card_id}|${l.language}|${l.variant}`;
+    (listingsBy.get(k) ?? listingsBy.set(k, []).get(k)!).push({ price: l.price_eur, seenAt: l.seen_at, condition: l.condition });
+  }
+  const factors = new Map<string, { value: number; n: number }>();
+  for (const r of take(factorStmts.length) as unknown as Array<{ set_id: string; language: string; factor: number; n: number }>) factors.set(`${r.set_id}|${r.language}`, { value: r.factor, n: r.n });
 
   const now = nowIso();
   for (const c of cards) {

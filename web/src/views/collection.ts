@@ -9,6 +9,7 @@ import { state } from "../lib/store.ts";
 import { addToCollection, confidenceBadge, empty, field, modal, placeholder, select, trendPill, upgradePrompt, COND_OPTIONS, LANG_OPTIONS } from "../components/ui.ts";
 import { landing } from "./landing.ts";
 import { navigate } from "../lib/router.ts";
+import { tr } from "../lib/i18n.ts";
 
 type SortKey = "newest" | "value" | "name" | "trend" | "pnl" | "set" | "number" | "qty" | "bought";
 const SORTS: Array<[SortKey, string]> = [["newest", "Zuletzt hinzugefügt"], ["value", "Wert ↓"], ["pnl", "Gewinn/Verlust ↓"], ["trend", "Trend 30 T. ↓"], ["name", "Name A–Z"], ["set", "Set · Nummer"], ["number", "Nummer"], ["qty", "Anzahl ↓"], ["bought", "Kaufdatum ↓"]];
@@ -25,13 +26,13 @@ export async function collection(_p: Record<string, string>, query: URLSearchPar
   const root = h("div", { class: "page collection-page" });
   const tabs = h("div", { class: "coll-tabs", role: "tablist" });
   const list = h("div", { class: "items" });
-  const input = h("input", { type: "search", class: "search-input", placeholder: "In der Sammlung suchen …", autocomplete: "off" });
-  const sort = h("select", { "aria-label": "Sortierung" }, ...SORTS.map(([v, t]) => h("option", { value: v }, t)));
-  const lang = h("select", { "aria-label": "Sprache" }, h("option", { value: "" }, "Alle Sprachen"), ...LANG_OPTIONS.map(([v, t]) => h("option", { value: v }, t)));
-  const kind = h("select", { "aria-label": "Art" }, h("option", { value: "" }, "Alle Karten"), h("option", { value: "raw" }, "Ungraded"), h("option", { value: "graded" }, "Graded"), h("option", { value: "nocost" }, "Ohne Kaufpreis"), h("option", { value: "noprice" }, "Ohne Marktwert"), h("option", { value: "multi" }, "Mehrfach (≥ 2)"));
-  const setSel = h("select", { "aria-label": "Set" }, h("option", { value: "" }, "Alle Sets"));
-  const view = h("div", { class: "seg" }, h("button", { class: "active", dataset: { v: "list" }, "aria-label": "Liste" }, svg(icons.sets, 18)), h("button", { dataset: { v: "grid" }, "aria-label": "Raster" }, svg(icons.cards, 18)));
-  const selectBtn = h("button", { class: "btn ghost sm", onClick: () => toggleSelect() }, svg(icons.check2, 16), " Auswählen");
+  const input = h("input", { type: "search", class: "search-input", placeholder: tr("In der Sammlung suchen …"), autocomplete: "off" });
+  const sort = h("select", { "aria-label": tr("Sortierung") }, ...SORTS.map(([v, t]) => h("option", { value: v }, tr(t))));
+  const lang = h("select", { "aria-label": tr("Sprache") }, h("option", { value: "" }, tr("Alle Sprachen")), ...LANG_OPTIONS.map(([v, t]) => h("option", { value: v }, tr(t))));
+  const kind = h("select", { "aria-label": tr("Art") }, h("option", { value: "" }, tr("Alle Karten")), h("option", { value: "raw" }, tr("Ungraded")), h("option", { value: "graded" }, tr("Graded")), h("option", { value: "nocost" }, tr("Ohne Kaufpreis")), h("option", { value: "noprice" }, tr("Ohne Marktwert")), h("option", { value: "multi" }, tr("Mehrfach (≥ 2)")));
+  const setSel = h("select", { "aria-label": tr("Set") }, h("option", { value: "" }, tr("Alle Sets")));
+  const view = h("div", { class: "seg" }, h("button", { class: "active", dataset: { v: "list" }, "aria-label": tr("Liste") }, svg(icons.sets, 18)), h("button", { dataset: { v: "grid" }, "aria-label": tr("Raster") }, svg(icons.cards, 18)));
+  const selectBtn = h("button", { class: "btn ghost sm", onClick: () => toggleSelect() }, svg(icons.check2, 16), tr(" Auswählen"));
   const total = h("div", { class: "stats compact" });
   const bulkBar = h("div", { class: "bulk-bar", hidden: true });
   if (query.get("lang")) lang.value = query.get("lang")!;
@@ -46,16 +47,16 @@ export async function collection(_p: Record<string, string>, query: URLSearchPar
     const sumOf = (id: number | null) => (id ? items.filter((i) => i.collectionId === id) : items).reduce((s, i) => s + val(i), 0);
     const tab = (id: number | null, name: string, n: number, c?: Collection) => h("button", { class: `coll-tab${current === id ? " active" : ""}`, role: "tab", "aria-selected": current === id ? "true" : "false", onClick: () => { current = id; drawTabs(); drawSets(); draw(); history.replaceState(null, "", id ? `/sammlung?c=${id}` : "/sammlung"); } },
       c?.color ? h("i", { class: "dot", style: { background: c.color } }) : null, h("span", null, name), h("small", null, `${n} · ${fmt.eurCompact(sumOf(id))}`));
-    tabs.append(tab(null, "Alle", items.reduce((s, i) => s + i.quantity, 0)));
+    tabs.append(tab(null, tr("Alle"), items.reduce((s, i) => s + i.quantity, 0)));
     for (const c of collections) tabs.append(tab(c.id, c.name, c.quantity, c));
-    tabs.append(h("button", { class: "coll-tab add", "aria-label": "Neue Sammlung", onClick: () => editCollection(null) }, svg(icons.plus, 16), h("span", null, "Neu")));
+    tabs.append(h("button", { class: "coll-tab add", "aria-label": tr("Neue Sammlung"), onClick: () => editCollection(null) }, svg(icons.plus, 16), h("span", null, tr("Neu"))));
   }
 
   function drawSets() {
     const cur = setSel.value;
     const sets = new Map<string, string>();
     for (const i of inScope()) sets.set(i.card.setId, i.card.setNameDe ?? i.card.setNameEn ?? i.card.setId);
-    setSel.replaceChildren(h("option", { value: "" }, "Alle Sets"), ...[...sets].sort((a, b) => a[1].localeCompare(b[1], "de")).map(([id, name]) => h("option", { value: id, selected: id === cur }, name)));
+    setSel.replaceChildren(h("option", { value: "" }, tr("Alle Sets")), ...[...sets].sort((a, b) => a[1].localeCompare(b[1], "de")).map(([id, name]) => h("option", { value: id, selected: id === cur }, name)));
   }
 
   function filtered(): CollectionItem[] {
@@ -76,14 +77,14 @@ export async function collection(_p: Record<string, string>, query: URLSearchPar
     clear(list);
     const rows = filtered();
     const sum = rows.reduce((s, i) => s + val(i), 0), cost = rows.reduce((s, i) => s + (i.purchasePriceEur ?? 0) * i.quantity, 0);
-    clear(total).append(h("div", { class: "stat" }, h("span", { class: "stat-title" }, "Wert"), h("strong", { class: "stat-value" }, fmt.eurCompact(sum))),
-      h("div", { class: "stat" }, h("span", { class: "stat-title" }, "Einstand"), h("strong", { class: "stat-value" }, cost ? fmt.eurCompact(cost) : "–")),
-      h("div", { class: "stat" }, h("span", { class: "stat-title" }, "Gewinn/Verlust"), h("strong", { class: `stat-value ${sum - cost >= 0 ? "up" : "down"}` }, cost ? `${sum - cost >= 0 ? "+" : ""}${fmt.eurCompact(sum - cost)}` : "–")),
-      h("div", { class: "stat" }, h("span", { class: "stat-title" }, "Karten"), h("strong", { class: "stat-value" }, `${rows.reduce((s, i) => s + i.quantity, 0)}`, h("small", { class: "muted" }, ` · ${rows.length} Pos.`))));
+    clear(total).append(h("div", { class: "stat" }, h("span", { class: "stat-title" }, tr("Wert")), h("strong", { class: "stat-value" }, fmt.eurCompact(sum))),
+      h("div", { class: "stat" }, h("span", { class: "stat-title" }, tr("Einstand")), h("strong", { class: "stat-value" }, cost ? fmt.eurCompact(cost) : "–")),
+      h("div", { class: "stat" }, h("span", { class: "stat-title" }, tr("Gewinn/Verlust")), h("strong", { class: `stat-value ${sum - cost >= 0 ? "up" : "down"}` }, cost ? `${sum - cost >= 0 ? "+" : ""}${fmt.eurCompact(sum - cost)}` : "–")),
+      h("div", { class: "stat" }, h("span", { class: "stat-title" }, tr("Karten")), h("strong", { class: "stat-value" }, `${rows.reduce((s, i) => s + i.quantity, 0)}`, h("small", { class: "muted" }, tr(" · {rowslength} Pos.", { rowslength: rows.length })))));
     if (!rows.length) {
-      list.appendChild(items.length ? empty("Keine Treffer", "Passe Suche oder Filter an.")
-        : empty("Noch keine Karten", "Scanne eine Karte mit dem Handy, suche sie – oder bring deine Sammlung von Collectr / Card Ladder mit.",
-          h("div", { class: "actions-row center" }, h("a", { class: "btn primary", href: "/suche" }, svg(icons.search, 16), " Karte suchen"), h("a", { class: "btn ghost", href: "/import" }, svg(icons.download, 16), " Importieren"))));
+      list.appendChild(items.length ? empty(tr("Keine Treffer"), tr("Passe Suche oder Filter an."))
+        : empty(tr("Noch keine Karten"), tr("Scanne eine Karte mit dem Handy, suche sie – oder bring deine Sammlung von Collectr / Card Ladder mit."),
+          h("div", { class: "actions-row center" }, h("a", { class: "btn primary", href: "/suche" }, svg(icons.search, 16), tr(" Karte suchen")), h("a", { class: "btn ghost", href: "/import" }, svg(icons.download, 16), tr(" Importieren")))));
       return;
     }
     const grid = view.querySelector(".active")!.getAttribute("data-v") === "grid";
@@ -102,8 +103,8 @@ export async function collection(_p: Record<string, string>, query: URLSearchPar
   };
   /** Two taps, no dialog: the trash button turns into "Entfernen?" for 4 seconds. */
   const removeItem = (it: CollectionItem, host: HTMLElement) => {
-    const confirmBtn = h("button", { class: "btn danger sm", onClick: async () => { try { await api.deleteItem(it.id); items = items.filter((x) => x.id !== it.id); invalidate(); toast("Entfernt.", "ok", { label: "Rückgängig", onClick: () => restore(it) }); draw(); drawTabs(); } catch (e) { toast((e as Error).message, "error"); } } }, "Entfernen?");
-    const cancel = h("button", { class: "icon-btn", "aria-label": "Abbrechen", onClick: () => draw() }, svg(icons.close, 16));
+    const confirmBtn = h("button", { class: "btn danger sm", onClick: async () => { try { await api.deleteItem(it.id); items = items.filter((x) => x.id !== it.id); invalidate(); toast("Entfernt.", "ok", { label: tr("Rückgängig"), onClick: () => restore(it) }); draw(); drawTabs(); } catch (e) { toast((e as Error).message, "error"); } } }, tr("Entfernen?"));
+    const cancel = h("button", { class: "icon-btn", "aria-label": tr("Abbrechen"), onClick: () => draw() }, svg(icons.close, 16));
     const box = h("span", { class: "confirm-inline" }, confirmBtn, cancel);
     host.replaceWith(box);
     setTimeout(() => { if (box.isConnected) draw(); }, 4000);
@@ -118,12 +119,12 @@ export async function collection(_p: Record<string, string>, query: URLSearchPar
 
   function qtyStepper(it: CollectionItem): HTMLElement {
     const box = h("span", { class: "qty-step" });
-    box.append(h("button", { "aria-label": it.quantity > 1 ? "Eins weniger" : "Entfernen", onClick: () => changeQty(it, -1, box) }, svg(it.quantity > 1 ? icons.minus : icons.trash, 14)), h("b", null, `${it.quantity}`), h("button", { "aria-label": "Eins mehr", onClick: () => changeQty(it, 1, box) }, svg(icons.plus, 14)));
+    box.append(h("button", { "aria-label": it.quantity > 1 ? tr("Eins weniger") : tr("Entfernen"), onClick: () => changeQty(it, -1, box) }, svg(it.quantity > 1 ? icons.minus : icons.trash, 14)), h("b", null, `${it.quantity}`), h("button", { "aria-label": tr("Eins mehr"), onClick: () => changeQty(it, 1, box) }, svg(icons.plus, 14)));
     return box;
   }
   function checkbox(it: CollectionItem): HTMLElement | null {
     if (!selectMode) return null;
-    const cb = h("input", { type: "checkbox", class: "sel", checked: selected.has(it.id), "aria-label": "Auswählen" }) as HTMLInputElement;
+    const cb = h("input", { type: "checkbox", class: "sel", checked: selected.has(it.id), "aria-label": tr("Auswählen") }) as HTMLInputElement;
     cb.addEventListener("change", () => { if (cb.checked) selected.add(it.id); else selected.delete(it.id); drawBulk(); });
     return cb;
   }
@@ -132,19 +133,19 @@ export async function collection(_p: Record<string, string>, query: URLSearchPar
     const img = cardImage(it.card);
     const p = it.purchasePriceEur != null && it.currentValue != null ? (it.currentValue - it.purchasePriceEur) * it.quantity : null;
     const coll = !current && collections.length > 1 ? collections.find((c) => c.id === it.collectionId) : null;
-    const trash = h("button", { class: "icon-btn danger", "aria-label": "Entfernen", onClick: (e: Event) => removeItem(it, e.currentTarget as HTMLElement) }, svg(icons.trash, 18));
+    const trash = h("button", { class: "icon-btn danger", "aria-label": tr("Entfernen"), onClick: (e: Event) => removeItem(it, e.currentTarget as HTMLElement) }, svg(icons.trash, 18));
     return h("div", { class: `item${selected.has(it.id) ? " selected" : ""}` },
       checkbox(it),
       h("a", { class: "item-img", href: `/karte/${encodeURIComponent(it.cardId)}` }, imgOr(img, () => placeholder(it.card))),
       h("div", { class: "item-body" },
         h("a", { class: "item-title", href: `/karte/${encodeURIComponent(it.cardId)}` }, h("strong", null, cardName(it.card)), h("span", { class: "num" }, `#${it.card.localId}`)),
         h("div", { class: "muted small" }, `${it.card.setNameDe ?? it.card.setNameEn ?? ""} · ${label.language(it.language)} · ${label.variant(it.variant)} · ${it.gradingCompany ? `${it.gradingCompany} ${it.grade ?? ""}${it.certNo ? ` · #${it.certNo}` : ""}` : label.condition(it.condition)}`),
-        h("div", { class: "item-badges" }, confidenceBadge(it.quote?.confidence), coll ? h("span", { class: "chip ghost" }, svg(icons.folder, 12), ` ${coll.name}`) : null, it.notes ? h("span", { class: "chip ghost", title: it.notes }, "Notiz") : null, it.source === "scan" ? h("span", { class: "chip ghost", title: "Per Scanner hinzugefügt" }, svg(icons.camera, 12)) : null)),
+        h("div", { class: "item-badges" }, confidenceBadge(it.quote?.confidence), coll ? h("span", { class: "chip ghost" }, svg(icons.folder, 12), ` ${coll.name}`) : null, it.notes ? h("span", { class: "chip ghost", title: it.notes }, tr("Notiz")) : null, it.source === "scan" ? h("span", { class: "chip ghost", title: tr("Per Scanner hinzugefügt") }, svg(icons.camera, 12)) : null)),
       h("div", { class: "item-values" },
         h("b", null, fmt.eur(it.currentValue != null ? it.currentValue * it.quantity : null)),
         h("div", { class: "small" }, trendPill(it.quote?.trend30)),
-        p != null ? h("div", { class: `small trend ${p >= 0 ? "up" : "down"}` }, `${p >= 0 ? "+" : ""}${fmt.eur(p)}`) : h("div", { class: "small muted" }, it.purchasePriceEur != null ? "" : "kein Kaufpreis")),
-      h("div", { class: "item-actions" }, qtyStepper(it), h("button", { class: "icon-btn", "aria-label": "Bearbeiten", onClick: () => addToCollection(it.card, it, { collections }) }, svg(icons.edit, 18)), trash),
+        p != null ? h("div", { class: `small trend ${p >= 0 ? "up" : "down"}` }, `${p >= 0 ? "+" : ""}${fmt.eur(p)}`) : h("div", { class: "small muted" }, it.purchasePriceEur != null ? "" : tr("kein Kaufpreis"))),
+      h("div", { class: "item-actions" }, qtyStepper(it), h("button", { class: "icon-btn", "aria-label": tr("Bearbeiten"), onClick: () => addToCollection(it.card, it, { collections }) }, svg(icons.edit, 18)), trash),
     );
   }
 
@@ -156,14 +157,14 @@ export async function collection(_p: Record<string, string>, query: URLSearchPar
       h("div", { class: "tile-body" }, h("div", { class: "tile-title" }, h("strong", null, cardName(it.card)), h("span", { class: "num" }, `#${it.card.localId}`)),
         h("div", { class: "tile-sub" }, `${label.language(it.language)} · ${it.gradingCompany ? `${it.gradingCompany} ${it.grade ?? ""}` : label.condition(it.condition)}`),
         h("div", { class: "tile-price" }, h("b", null, fmt.eur(it.currentValue != null ? it.currentValue * it.quantity : null)), trendPill(it.quote?.trend30))),
-      h("div", { class: "tile-tools" }, h("button", { class: "icon-btn", "aria-label": "Bearbeiten", onClick: () => addToCollection(it.card, it, { collections }) }, svg(icons.edit, 16)), h("button", { class: "icon-btn danger", "aria-label": "Entfernen", onClick: (e: Event) => removeItem(it, (e.currentTarget as HTMLElement).parentElement!) }, svg(icons.trash, 16))),
+      h("div", { class: "tile-tools" }, h("button", { class: "icon-btn", "aria-label": tr("Bearbeiten"), onClick: () => addToCollection(it.card, it, { collections }) }, svg(icons.edit, 16)), h("button", { class: "icon-btn danger", "aria-label": tr("Entfernen"), onClick: (e: Event) => removeItem(it, (e.currentTarget as HTMLElement).parentElement!) }, svg(icons.trash, 16))),
     );
   }
 
   // ---------- multi-select ----------
   function toggleSelect(on = !selectMode) {
     selectMode = on; selected.clear();
-    selectBtn.classList.toggle("active", on); selectBtn.replaceChildren(svg(on ? icons.close : icons.check2, 16), on ? " Abbrechen" : " Auswählen");
+    selectBtn.classList.toggle("active", on); selectBtn.replaceChildren(svg(on ? icons.close : icons.check2, 16), on ? tr(" Abbrechen") : tr(" Auswählen"));
     draw();
   }
   function drawBulk() {
@@ -171,47 +172,47 @@ export async function collection(_p: Record<string, string>, query: URLSearchPar
     if (!selectMode) return;
     const n = selected.size;
     const visible = filtered();
-    const all = h("button", { class: "btn ghost sm", onClick: () => { if (selected.size === visible.length) selected.clear(); else visible.forEach((i) => selected.add(i.id)); draw(); } }, selected.size === visible.length ? "Keine" : `Alle (${visible.length})`);
-    const move = h("button", { class: "btn ghost sm", disabled: !n, onClick: () => bulkMove() }, svg(icons.folder, 14), " Verschieben");
-    const cond = h("button", { class: "btn ghost sm", disabled: !n, onClick: () => bulkCondition() }, svg(icons.edit, 14), " Zustand");
+    const all = h("button", { class: "btn ghost sm", onClick: () => { if (selected.size === visible.length) selected.clear(); else visible.forEach((i) => selected.add(i.id)); draw(); } }, selected.size === visible.length ? tr("Keine") : tr("Alle ({visiblelengt})", { visiblelengt: visible.length }));
+    const move = h("button", { class: "btn ghost sm", disabled: !n, onClick: () => bulkMove() }, svg(icons.folder, 14), tr(" Verschieben"));
+    const cond = h("button", { class: "btn ghost sm", disabled: !n, onClick: () => bulkCondition() }, svg(icons.edit, 14), tr(" Zustand"));
     const del = h("button", { class: "btn danger sm", disabled: !n, onClick: () => bulkDelete() }, svg(icons.trash, 14), ` Löschen${n ? ` (${n})` : ""}`);
-    bulkBar.replaceChildren(h("span", { class: "bulk-count" }, `${n} ausgewählt`), all, move, cond, del);
+    bulkBar.replaceChildren(h("span", { class: "bulk-count" }, tr("{n} ausgewählt", { n })), all, move, cond, del);
   }
   const afterBulk = async (msg: string) => { invalidate(); await refresh(); toggleSelect(false); toast(msg); };
   function bulkMove() {
     const sel = select("collection", collections.filter((c) => c.id !== current).map((c) => [String(c.id), c.name]));
-    const btn = h("button", { class: "btn primary", onClick: async () => { try { const r = await api.bulkItems({ action: "move", ids: [...selected], collectionId: Number(sel.value) }); close(); afterBulk(`${r.affected} Karten verschoben.`); } catch (e) { toast((e as Error).message, "error"); } } }, "Verschieben");
-    const close = modal(`${selected.size} Karten verschieben`, h("div", { class: "form" }, collections.length > 1 ? field("In Sammlung", sel) : h("p", { class: "muted" }, "Lege zuerst eine zweite Sammlung an."), h("div", { class: "actions" }, h("button", { class: "btn ghost", onClick: () => { close(); editCollection(null); } }, svg(icons.plus, 14), " Neue Sammlung"), collections.length > 1 ? btn : null)));
+    const btn = h("button", { class: "btn primary", onClick: async () => { try { const r = await api.bulkItems({ action: "move", ids: [...selected], collectionId: Number(sel.value) }); close(); afterBulk(tr("{raffected} Karten verschoben.", { raffected: r.affected })); } catch (e) { toast((e as Error).message, "error"); } } }, tr("Verschieben"));
+    const close = modal(tr("{selectedsize} Karten verschieben", { selectedsize: selected.size }), h("div", { class: "form" }, collections.length > 1 ? field(tr("In Sammlung"), sel) : h("p", { class: "muted" }, tr("Lege zuerst eine zweite Sammlung an.")), h("div", { class: "actions" }, h("button", { class: "btn ghost", onClick: () => { close(); editCollection(null); } }, svg(icons.plus, 14), tr(" Neue Sammlung")), collections.length > 1 ? btn : null)));
   }
   function bulkCondition() {
     const sel = select("condition", COND_OPTIONS, "NM");
-    const btn = h("button", { class: "btn primary", onClick: async () => { try { const r = await api.bulkItems({ action: "update", ids: [...selected], patch: { condition: sel.value } }); close(); afterBulk(`Zustand bei ${r.affected} Karten gesetzt.`); } catch (e) { toast((e as Error).message, "error"); } } }, "Übernehmen");
-    const close = modal("Zustand setzen", h("div", { class: "form" }, field("Zustand", sel), h("div", { class: "actions" }, btn)));
+    const btn = h("button", { class: "btn primary", onClick: async () => { try { const r = await api.bulkItems({ action: "update", ids: [...selected], patch: { condition: sel.value } }); close(); afterBulk(tr("Zustand bei {raffected} Karten gesetzt.", { raffected: r.affected })); } catch (e) { toast((e as Error).message, "error"); } } }, tr("Übernehmen"));
+    const close = modal(tr("Zustand setzen"), h("div", { class: "form" }, field(tr("Zustand"), sel), h("div", { class: "actions" }, btn)));
   }
   function bulkDelete() {
     const n = selected.size;
-    const btn = h("button", { class: "btn danger", onClick: async () => { try { const r = await api.bulkItems({ action: "delete", ids: [...selected] }); close(); afterBulk(`${r.affected} Karten entfernt.`); } catch (e) { toast((e as Error).message, "error"); } } }, `${n} Karten entfernen`);
-    const close = modal("Wirklich entfernen?", h("div", { class: "form" }, h("p", null, `${n} Positionen werden aus der Sammlung gelöscht. Das lässt sich nicht rückgängig machen.`), h("div", { class: "actions" }, h("button", { class: "btn ghost", onClick: () => close() }, "Abbrechen"), btn)));
+    const btn = h("button", { class: "btn danger", onClick: async () => { try { const r = await api.bulkItems({ action: "delete", ids: [...selected] }); close(); afterBulk(tr("{raffected} Karten entfernt.", { raffected: r.affected })); } catch (e) { toast((e as Error).message, "error"); } } }, tr("{n} Karten entfernen", { n }));
+    const close = modal(tr("Wirklich entfernen?"), h("div", { class: "form" }, h("p", null, tr("{n} Positionen werden aus der Sammlung gelöscht. Das lässt sich nicht rückgängig machen.", { n })), h("div", { class: "actions" }, h("button", { class: "btn ghost", onClick: () => close() }, tr("Abbrechen")), btn)));
   }
 
   // ---------- collection management ----------
   function editCollection(c: Collection | null) {
-    const name = h("input", { value: c?.name ?? "", placeholder: "z. B. Binder 151, Verkauf, Graded", maxlength: 60, required: true });
-    const desc = h("input", { value: c?.description ?? "", placeholder: "Optional: wofür ist diese Sammlung?", maxlength: 300 });
+    const name = h("input", { value: c?.name ?? "", placeholder: tr("z. B. Binder 151, Verkauf, Graded"), maxlength: 60, required: true });
+    const desc = h("input", { value: c?.description ?? "", placeholder: tr("Optional: wofür ist diese Sammlung?"), maxlength: 300 });
     const colors = ["#e11d48", "#f97316", "#eab308", "#22c55e", "#0ea5e9", "#8b5cf6", "#64748b"];
     let color = c?.color ?? null;
     const sw = h("div", { class: "swatches" }, ...colors.map((cl) => h("button", { type: "button", class: `swatch${color === cl ? " active" : ""}`, style: { background: cl }, "aria-label": cl, onClick: (e: Event) => { color = color === cl ? null : cl; sw.querySelectorAll(".swatch").forEach((b) => b.classList.toggle("active", b === e.currentTarget && color === cl)); } })));
-    const submit = h("button", { class: "btn primary", type: "submit" }, c ? "Speichern" : "Anlegen");
-    const form = h("form", { class: "form" }, field("Name", name), field("Beschreibung", desc), field("Farbe", sw), h("div", { class: "actions" }, submit));
+    const submit = h("button", { class: "btn primary", type: "submit" }, c ? tr("Speichern") : tr("Anlegen"));
+    const form = h("form", { class: "form" }, field(tr("Name"), name), field(tr("Beschreibung"), desc), field(tr("Farbe"), sw), h("div", { class: "actions" }, submit));
     form.addEventListener("submit", async (e) => {
       e.preventDefault(); submit.disabled = true;
       try {
         if (c) await api.updateCollection(c.id, { name: name.value, description: desc.value || null, color });
         else { const r = await api.createCollection({ name: name.value, description: desc.value || null, color }); current = r.collection.id; history.replaceState(null, "", `/sammlung?c=${current}`); }
-        close(); await refresh(); toast(c ? "Gespeichert." : "Sammlung angelegt.");
+        close(); await refresh(); toast(c ? tr("Gespeichert.") : tr("Sammlung angelegt."));
       } catch (err) { submit.disabled = false; if (err instanceof HttpError && err.status === 402) { close(); upgradePrompt(err.message); } else toast((err as Error).message, "error"); }
     });
-    const close = modal(c ? "Sammlung bearbeiten" : "Neue Sammlung", form);
+    const close = modal(c ? tr("Sammlung bearbeiten") : tr("Neue Sammlung"), form);
     setTimeout(() => name.focus(), 60);
   }
 
@@ -220,12 +221,12 @@ export async function collection(_p: Record<string, string>, query: URLSearchPar
     const body = h("div", { class: "menu-list" });
     const item = (icon: string, text: string, fn: () => void, danger = false) => h("button", { class: `menu-item${danger ? " danger" : ""}`, onClick: () => { close(); fn(); } }, svg(icon, 18), h("span", null, text));
     body.append(...[
-      c ? item(icons.edit, "Umbenennen / Farbe", () => editCollection(c)) : item(icons.plus, "Neue Sammlung", () => editCollection(null)),
-      c ? item(icons.share, c.shareToken ? "Link teilen · aktiv" : "Per Link teilen", () => shareDialog(c)) : null,
+      c ? item(icons.edit, tr("Umbenennen / Farbe"), () => editCollection(c)) : item(icons.plus, tr("Neue Sammlung"), () => editCollection(null)),
+      c ? item(icons.share, c.shareToken ? tr("Link teilen · aktiv") : tr("Per Link teilen"), () => shareDialog(c)) : null,
       item(icons.download, `CSV exportieren${c ? ` (${c.name})` : ""}`, () => { location.href = `/api/export.csv${c ? `?collection=${c.id}` : ""}`; }),
-      item(icons.upload, "Karten importieren", () => navigate(`/import${c ? `?c=${c.id}` : ""}`)),
-      c && !c.isDefault ? item(icons.star, "Als Standard-Sammlung", async () => { await api.updateCollection(c.id, { isDefault: true }); await refresh(); toast("Standard gesetzt."); }) : null,
-      c ? item(icons.trash, "Sammlung löschen", () => deleteCollection(c), true) : null,
+      item(icons.upload, tr("Karten importieren"), () => navigate(`/import${c ? `?c=${c.id}` : ""}`)),
+      c && !c.isDefault ? item(icons.star, tr("Als Standard-Sammlung"), async () => { await api.updateCollection(c.id, { isDefault: true }); await refresh(); toast("Standard gesetzt."); }) : null,
+      c ? item(icons.trash, tr("Sammlung löschen"), () => deleteCollection(c), true) : null,
     ].filter(Boolean) as HTMLElement[]);
     const close = modal(c ? c.name : "Alle Karten", body);
   }
@@ -234,23 +235,23 @@ export async function collection(_p: Record<string, string>, query: URLSearchPar
     const draw = (token: string | null) => {
       const url = token ? `${location.origin}/s/${token}` : null;
       body.replaceChildren(h("div", { class: "form" },
-        h("p", null, "Wer den Link hat, sieht die Karten und Marktwerte dieser Sammlung – keine Kaufpreise, keine Notizen, keine E-Mail."),
+        h("p", null, tr("Wer den Link hat, sieht die Karten und Marktwerte dieser Sammlung – keine Kaufpreise, keine Notizen, keine E-Mail.")),
         url ? h("div", { class: "share-box" }, h("input", { value: url, readonly: true, onClick: (e: Event) => (e.currentTarget as HTMLInputElement).select() }),
-          h("button", { class: "btn primary sm", onClick: async () => { try { await navigator.clipboard.writeText(url); toast("Link kopiert."); } catch { toast("Bitte Link markieren und kopieren.", "error"); } } }, svg(icons.copy, 14), " Kopieren"),
-          typeof navigator.share === "function" ? h("button", { class: "btn ghost sm", onClick: () => navigator.share({ title: `${c.name} – Sammlerwert`, url }).catch(() => {}) }, svg(icons.share, 14), " Teilen") : null) : null,
+          h("button", { class: "btn primary sm", onClick: async () => { try { await navigator.clipboard.writeText(url); toast("Link kopiert."); } catch { toast("Bitte Link markieren und kopieren.", "error"); } } }, svg(icons.copy, 14), tr(" Kopieren")),
+          typeof navigator.share === "function" ? h("button", { class: "btn ghost sm", onClick: () => navigator.share({ title: tr("{cname} – Sammlerwert", { cname: c.name }), url }).catch(() => {}) }, svg(icons.share, 14), tr(" Teilen")) : null) : null,
         h("div", { class: "actions" },
-          url ? h("button", { class: "btn ghost danger", onClick: async () => { await api.unshareCollection(c.id); c.shareToken = null; draw(null); toast("Link deaktiviert."); } }, "Link deaktivieren")
-            : h("button", { class: "btn primary", onClick: async () => { const r = await api.shareCollection(c.id); c.shareToken = r.token; draw(r.token); } }, svg(icons.share, 14), " Link erstellen"),
-          url ? h("a", { class: "btn ghost", href: url, target: "_blank", rel: "noopener" }, "Ansehen") : null),
+          url ? h("button", { class: "btn ghost danger", onClick: async () => { await api.unshareCollection(c.id); c.shareToken = null; draw(null); toast("Link deaktiviert."); } }, tr("Link deaktivieren"))
+            : h("button", { class: "btn primary", onClick: async () => { const r = await api.shareCollection(c.id); c.shareToken = r.token; draw(r.token); } }, svg(icons.share, 14), tr(" Link erstellen")),
+          url ? h("a", { class: "btn ghost", href: url, target: "_blank", rel: "noopener" }, tr("Ansehen")) : null),
       ));
     };
     draw(c.shareToken);
-    modal("Sammlung teilen", body);
+    modal(tr("Sammlung teilen"), body);
   }
   function deleteCollection(c: Collection) {
-    const keep = h("button", { class: "btn primary", onClick: async () => { try { await api.deleteCollection(c.id, false); close(); current = null; history.replaceState(null, "", "/sammlung"); await refresh(); toast("Sammlung gelöscht, Karten behalten."); } catch (e) { toast((e as Error).message, "error"); } } }, "Löschen, Karten behalten");
-    const all = h("button", { class: "btn danger ghost", onClick: async () => { try { await api.deleteCollection(c.id, true); close(); current = null; history.replaceState(null, "", "/sammlung"); await refresh(); toast("Sammlung samt Karten gelöscht."); } catch (e) { toast((e as Error).message, "error"); } } }, `Mit ${c.quantity} Karten löschen`);
-    const close = modal(`„${c.name}“ löschen?`, h("div", { class: "form" }, h("p", null, "Die Karten können in deine Standard-Sammlung wandern oder mit gelöscht werden."), h("div", { class: "actions" }, h("button", { class: "btn ghost", onClick: () => close() }, "Abbrechen"), keep, c.quantity ? all : null)));
+    const keep = h("button", { class: "btn primary", onClick: async () => { try { await api.deleteCollection(c.id, false); close(); current = null; history.replaceState(null, "", "/sammlung"); await refresh(); toast("Sammlung gelöscht, Karten behalten."); } catch (e) { toast((e as Error).message, "error"); } } }, tr("Löschen, Karten behalten"));
+    const all = h("button", { class: "btn danger ghost", onClick: async () => { try { await api.deleteCollection(c.id, true); close(); current = null; history.replaceState(null, "", "/sammlung"); await refresh(); toast("Sammlung samt Karten gelöscht."); } catch (e) { toast((e as Error).message, "error"); } } }, tr("Mit {cquantity} Karten löschen", { cquantity: c.quantity }));
+    const close = modal(tr("„{cname}“ löschen?", { cname: c.name }), h("div", { class: "form" }, h("p", null, tr("Die Karten können in deine Standard-Sammlung wandern oder mit gelöscht werden.")), h("div", { class: "actions" }, h("button", { class: "btn ghost", onClick: () => close() }, tr("Abbrechen")), keep, c.quantity ? all : null)));
   }
 
   // ---------- wiring ----------
@@ -259,8 +260,8 @@ export async function collection(_p: Record<string, string>, query: URLSearchPar
   view.addEventListener("click", (e) => { const b = (e.target as HTMLElement).closest("button"); if (!b) return; view.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b)); draw(); });
 
   root.append(
-    h("header", { class: "page-head" }, h("div", null, h("p", { class: "eyebrow" }, "Sammlung"), h("h1", null, "Meine Karten")),
-      h("div", { class: "head-actions" }, h("button", { class: "btn ghost", "aria-label": "Sammlung verwalten", onClick: manageMenu }, svg(icons.more, 18), h("span", { class: "hide-sm" }, " Verwalten")), h("a", { class: "btn primary", href: "/suche" }, svg(icons.plus, 18), " Hinzufügen"))),
+    h("header", { class: "page-head" }, h("div", null, h("p", { class: "eyebrow" }, tr("Sammlung")), h("h1", null, tr("Meine Karten"))),
+      h("div", { class: "head-actions" }, h("button", { class: "btn ghost", "aria-label": tr("Sammlung verwalten"), onClick: manageMenu }, svg(icons.more, 18), h("span", { class: "hide-sm" }, tr(" Verwalten"))), h("a", { class: "btn primary", href: "/suche" }, svg(icons.plus, 18), tr(" Hinzufügen")))),
     tabs, total,
     h("div", { class: "search-bar" }, h("div", { class: "search-wrap" }, svg(icons.search, 20), input), lang, kind, setSel, sort, view, selectBtn),
     bulkBar, list,

@@ -9,6 +9,7 @@ import { handleApp } from "../server/app.ts";
 import { runJob } from "../server/jobs/scheduler.ts";
 import { r2Store, useBlobStore, type R2BucketLike } from "../server/storage.ts";
 import { useScanProvider, workersAiProvider } from "../server/scan.ts";
+import { useTextAi, warmTranslations } from "../server/i18n.ts";
 
 export interface Env {
   DB: D1DatabaseLike;
@@ -20,6 +21,7 @@ export interface Env {
 
 interface ScheduledEvent { cron: string; scheduledTime: number }
 interface ExecutionContext { waitUntil(p: Promise<unknown>): void }
+interface CacheLike { match(req: Request): Promise<Response | undefined>; put(req: Request, res: Response): Promise<void> }
 
 function setup(env: Env) {
   const vars: Record<string, string | undefined> = {};
@@ -29,20 +31,34 @@ function setup(env: Env) {
   useDb(db);
   useBlobStore(env.UPLOADS ? r2Store(env.UPLOADS) : null);
   useScanProvider(env.AI ? workersAiProvider(env.AI) : null);
+  useTextAi(env.AI ?? null);
   return db;
 }
 
+/** Public, user-independent GET endpoints that may be served from the edge cache for a minute. */
+const EDGE_CACHEABLE = /^\/api\/(sets(\/[^/]+)?|cards\/[^/]+|search|market\/movers|health|share\/[^/]+|i18n\/[^/]+)$/;
+
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const db = setup(env);
+    const url = new URL(request.url);
+    const cacheable = request.method === "GET" && EDGE_CACHEABLE.test(url.pathname);
+    const cache = cacheable && typeof caches !== "undefined" ? (caches as unknown as { default: CacheLike }).default : null;
+    if (cache) { const hit = await cache.match(request); if (hit) return hit; }
     const res = await handleApp(request, db, console.log);
-    if (res) return res;
-    return env.ASSETS.fetch(request);
+    if (!res) return env.ASSETS.fetch(request);
+    if (cache && res.ok) {
+      const ttl = url.pathname === "/api/health" ? 60 : 120;
+      res.headers.set("cache-control", `public, max-age=60, s-maxage=${ttl}`);
+      ctx.waitUntil(cache.put(request, res.clone()));
+    }
+    return res;
   },
 
-  /** Cron is intentionally unused on the free tier (10 ms CPU); data jobs run in GitHub Actions. Kept for paid setups. */
+  /** Data jobs run in GitHub Actions (nightly.yml). The Worker cron only warms UI translations (needs the AI binding). */
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     const db = setup(env);
+    if (event.cron === "23 3 * * *") { ctx.waitUntil(warmTranslations(db, console.log).catch((e) => console.error(e))); return; }
     ctx.waitUntil(runJob(db, event.cron === "*/10 * * * *" ? "catalog_completion" : "daily_refresh").catch((e) => console.error(e)));
   },
 };

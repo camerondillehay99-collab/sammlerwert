@@ -32,6 +32,9 @@ export class BunSqliteDb implements SqlDb {
     for (const s of statements) this.check(s.params);
     this.raw.transaction(() => { for (const s of statements) this.raw.query(s.sql).run(...(s.params as never[])); })();
   }
+  async queryMany(statements: Statement[]): Promise<Row[][]> {
+    return statements.map((s) => { this.check(s.params); return this.raw.query(s.sql).all(...(s.params as never[])) as Row[]; });
+  }
   async exec(sql: string) { this.raw.exec(sql); }
   close() { this.raw.close(); }
 }

@@ -20,6 +20,7 @@ const COLUMNS: Array<[table: string, column: string, ddl: string]> = [
 
 const TABLES: string[] = [
   `CREATE TABLE IF NOT EXISTS psa_certs (cert_no TEXT PRIMARY KEY, fetched_at TEXT NOT NULL, payload TEXT NOT NULL, card_id TEXT)`,
+  `CREATE TABLE IF NOT EXISTS ui_translations (lang TEXT NOT NULL, key TEXT NOT NULL, text TEXT NOT NULL, PRIMARY KEY (lang, key))`,
 ];
 
 let done: Promise<string[]> | null = null;
@@ -28,19 +29,32 @@ export function ensureSchema(db: SqlDb): Promise<string[]> {
   return done;
 }
 
+/** Column names from a CREATE TABLE statement: comments stripped, split on top-level commas only. */
+export function columnsOf(ddl: string): Set<string> {
+  const noComments = ddl.replace(/--[^\n]*/g, "");
+  const body = noComments.slice(noComments.indexOf("(") + 1, noComments.lastIndexOf(")"));
+  const parts: string[] = []; let depth = 0, cur = "";
+  for (const ch of body) {
+    if (ch === "(") depth++; else if (ch === ")") depth--;
+    if (ch === "," && depth === 0) { parts.push(cur); cur = ""; } else cur += ch;
+  }
+  parts.push(cur);
+  return new Set(parts.map((p) => p.trim().split(/\s+/)[0]!.replace(/["`]/g, "")).filter((c) => c && !/^(PRIMARY|UNIQUE|FOREIGN|CHECK|CONSTRAINT)$/i.test(c)));
+}
+
 export async function migrate(db: SqlDb): Promise<string[]> {
   const applied: string[] = [];
+  // One round trip: the CREATE TABLE statements of every table we care about, parsed for column names.
+  const tables = [...new Set([...COLUMNS.map((c) => c[0]), ...TABLES.map((t) => t.match(/EXISTS (\w+)/)![1]!)])];
+  const rows = await db.all<{ name: string; sql: string }>(`SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name IN (${tables.map(() => "?").join(",")})`, tables);
   const known = new Map<string, Set<string>>();
+  for (const r of rows) known.set(r.name, columnsOf(r.sql));
   for (const [table, column, ddl] of COLUMNS) {
-    let cols = known.get(table);
-    if (!cols) {
-      cols = new Set((await db.all<{ name: string }>(`PRAGMA table_info(${table})`)).map((r) => r.name));
-      known.set(table, cols);
-    }
-    if (cols.has(column)) continue;
+    const cols = known.get(table);
+    if (!cols || cols.has(column)) continue;
     await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
     cols.add(column); applied.push(`${table}.${column}`);
   }
-  for (const sql of TABLES) await db.exec(sql);
+  for (const sql of TABLES) { const name = sql.match(/EXISTS (\w+)/)![1]!; if (!known.has(name)) { await db.exec(sql); applied.push(name); } }
   return applied;
 }

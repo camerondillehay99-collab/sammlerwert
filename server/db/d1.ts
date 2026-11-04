@@ -27,6 +27,12 @@ export class D1Db implements SqlDb {
     if (!statements.length) return;
     await this.d1.batch(statements.map((s) => this.prep(s.sql, s.params)));
   }
+  /** Independent reads in one network round trip – the single biggest latency win on D1. */
+  async queryMany(statements: Statement[]): Promise<Row[][]> {
+    if (!statements.length) return [];
+    const res = await this.d1.batch<{ results: Row[] }>(statements.map((s) => this.prep(s.sql, s.params)));
+    return res.map((r) => r.results ?? []);
+  }
   async exec(sql: string) {
     // D1 exec() expects one statement per line: strip comments, collapse each statement onto one line.
     const noComments = sql.split("\n").map((l) => l.replace(/--.*$/, "")).join("\n");
