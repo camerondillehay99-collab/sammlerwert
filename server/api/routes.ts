@@ -3,7 +3,7 @@ import type { Condition, GradingCompany, Language, Variant } from "../../shared/
 import { config } from "../config.ts";
 import { ApiError, badRequest, forbidden, json, notFound, num, oneOf, paymentRequired, readJson, str } from "../http.ts";
 import { currentUser, planLimits, requireUser } from "../auth.ts";
-import { catalogStats, getCardDetail, getSet, listSets, marketMovers, searchCards, getCardSummaries } from "../services/catalog.ts";
+import { catalogStats, catalogFacets, getCardDetail, getCardSnapshot, getSet, listSets, marketMovers, recentSales, searchCards, getCardSummaries } from "../services/catalog.ts";
 import { applySubscriptionEvent, createCheckoutSession, createPortalSession, stripeConfigured, verifyWebhook } from "../billing/stripe.ts";
 import { JOB_NAMES, runJob, type JobName } from "../jobs/scheduler.ts";
 import { ebayConfigured } from "../ingest/ebay.ts";
@@ -62,8 +62,21 @@ add("POST", "/api/scan", async (req, _p, db) => {
 add("GET", "/api/search", async (req, _p, db) => {
   const u = new URL(req.url);
   const q = u.searchParams.get("q") ?? "";
-  const r = await searchCards(db, q, { setId: u.searchParams.get("set"), limit: Number(u.searchParams.get("limit") ?? 40), offset: Number(u.searchParams.get("offset") ?? 0), sort: u.searchParams.get("sort") ?? undefined });
-  return json(r, 200, { "cache-control": "public, max-age=60" });
+  const g = (k: string) => u.searchParams.get(k);
+  const n = (k: string) => { const v = Number(g(k)); return g(k) != null && g(k) !== "" && Number.isFinite(v) ? v : null; };
+  const ids = g("ids") ? g("ids")!.split(",").filter(Boolean).slice(0, 90) : null;
+  const r = await searchCards(db, q, { setId: g("set"), limit: Number(g("limit") ?? 40), offset: Number(g("offset") ?? 0), sort: g("sort") ?? undefined,
+    rarity: g("rarity"), category: g("category"), min: n("min"), max: n("max"), priced: g("priced") === "1", ids });
+  return json(r, 200, { "cache-control": ids ? "private, no-store" : "public, max-age=60" });
+});
+add("GET", "/api/catalog/facets", async (_r, _p, db) => json(await catalogFacets(db), 200, { "cache-control": "public, max-age=3600" }));
+add("GET", "/api/market/sales", async (req, _p, db) => {
+  const u = new URL(req.url);
+  const g = (k: string) => u.searchParams.get(k);
+  const grade = g("grade") ? Number(g("grade")) : null;
+  const r = await recentSales(db, { grader: g("grader"), grade: grade != null && Number.isFinite(grade) ? grade : null, condition: g("condition"), setId: g("set"), source: g("source"),
+    graded: g("graded") === "1" ? true : g("graded") === "0" ? false : null, minPrice: g("min") ? Number(g("min")) : null, limit: Number(g("limit") ?? 50), offset: Number(g("offset") ?? 0) });
+  return json(r, 200, { "cache-control": "public, max-age=120" });
 });
 add("GET", "/api/sets", async (_r, _p, db) => json({ items: await listSets(db) }, 200, { "cache-control": "public, max-age=300" }));
 add("GET", "/api/sets/:id", async (req, p, db) => {
@@ -77,6 +90,11 @@ add("GET", "/api/cards/:id", async (_r, p, db) => {
   const card = await getCardDetail(db, p.id!);
   if (!card) throw notFound("Karte nicht gefunden.");
   return json(card, 200, { "cache-control": "public, max-age=60" });
+});
+add("GET", "/api/cards/:id/snapshot", async (_r, p, db) => {
+  const snap = await getCardSnapshot(db, p.id!);
+  if (!snap) throw notFound("Karte nicht gefunden.");
+  return json(snap, 200, { "cache-control": "public, max-age=300" });
 });
 add("GET", "/api/market/movers", async (req, _p, db) => {
   const u = new URL(req.url);

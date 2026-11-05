@@ -156,8 +156,38 @@ export const GRADE_MULT: Record<string, Record<string, number>> = {
   PSA: { "10": 3.0, "9": 1.5, "8": 1.1, "7": 0.95 },
   BGS: { "10": 4.5, "9.5": 2.6, "9": 1.4, "8.5": 1.05 },
   CGC: { "10": 2.8, "9.5": 1.7, "9": 1.3 },
+  TAG: { "10": 3.2, "9.5": 2.0, "9": 1.4 },
   default: { "10": 2.5, "9.5": 1.6, "9": 1.3, "8": 1.05 },
 };
+/** Grades shown as estimates (clearly labelled) until real graded sales exist – the companies collectors actually compare. */
+export const ESTIMATED_GRADES: Array<[company: string, grade: number]> = [["PSA", 10], ["PSA", 9], ["PSA", 8], ["BGS", 10], ["BGS", 9.5], ["BGS", 9], ["CGC", 10], ["CGC", 9.5], ["CGC", 9], ["TAG", 10], ["TAG", 9]];
+
+/**
+ * Condition ladder on the US scale (what TCGplayer/eBay buyers use) with the Cardmarket equivalents.
+ * Multipliers are relative to Near Mint and get replaced by real sales medians per bucket when ≥ 2 exist.
+ */
+export const CONDITION_LADDER: Array<{ code: "NM" | "LP" | "MP" | "HP" | "DMG"; cardmarket: Array<"MT" | "NM" | "EX" | "GD" | "LP" | "PL" | "PO">; label: string; multiplier: number }> = [
+  { code: "NM", cardmarket: ["MT", "NM"], label: "Near Mint", multiplier: 1 },
+  { code: "LP", cardmarket: ["EX", "GD"], label: "Lightly Played", multiplier: 0.78 },
+  { code: "MP", cardmarket: ["LP"], label: "Moderately Played", multiplier: 0.6 },
+  { code: "HP", cardmarket: ["PL"], label: "Heavily Played", multiplier: 0.45 },
+  { code: "DMG", cardmarket: ["PO"], label: "Damaged", multiplier: 0.3 },
+];
+
+export interface ConditionSaleInput { price: number; soldAt: string; condition: string | null }
+export function conditionLadder(sales: ConditionSaleInput[], nmValue: number | null, now = nowIso()) {
+  const nowMs = new Date(now).getTime();
+  const age = (iso: string) => (nowMs - new Date(iso).getTime()) / 86_400_000;
+  return CONDITION_LADDER.map((step) => {
+    const bucket = sales.filter((s) => s.price > 0 && s.condition && (step.cardmarket as string[]).includes(s.condition) && age(s.soldAt) <= 180);
+    if (bucket.length >= 2) {
+      const pts: WPoint[] = bucket.map((s) => ({ v: s.price, w: Math.pow(0.5, age(s.soldAt) / 45) }));
+      const v = weightedMedian(trimOutliers(pts));
+      if (v != null) return { ...step, value: round2(v), n: bucket.length, method: "sales" as const };
+    }
+    return { ...step, value: nmValue != null ? round2(nmValue * step.multiplier) : null, n: bucket.length, method: "estimate" as const };
+  });
+}
 const GRADED_HALF_LIFE_DAYS = 45; // graded cards trade less often; decay slower than raw
 
 export interface GradedSaleInput { price: number; soldAt: string; company: string; grade: number; verified: boolean }
@@ -200,13 +230,13 @@ export function gradedValues(sales: GradedSaleInput[], rawValue: number | null, 
       lastSoldAt: g.map((s) => s.soldAt).sort().at(-1) ?? null, method: "sales",
     });
   }
-  if (rawValue != null && rawValue >= 5) {
-    for (const grade of [10, 9]) {
-      if (out.some((v) => v.company === "PSA" && v.grade === grade)) continue;
-      out.push({ company: "PSA", grade, value: round2(rawValue * gradeMultiplier("PSA", grade))!, low: null, high: null, n: 0, n90: 0, lastSoldAt: null, method: "multiplier" });
+  if (rawValue != null && rawValue >= 2) {
+    for (const [company, grade] of ESTIMATED_GRADES) {
+      if (out.some((v) => v.company === company && v.grade === grade)) continue;
+      out.push({ company, grade, value: round2(rawValue * gradeMultiplier(company, grade))!, low: null, high: null, n: 0, n90: 0, lastSoldAt: null, method: "multiplier" });
     }
   }
-  const rank: Record<string, number> = { PSA: 0, CGC: 1, BGS: 2 };
+  const rank: Record<string, number> = { PSA: 0, BGS: 1, CGC: 2, TAG: 3 };
   return out.sort((a, b) => (rank[a.company] ?? 9) - (rank[b.company] ?? 9) || b.grade - a.grade);
 }
 

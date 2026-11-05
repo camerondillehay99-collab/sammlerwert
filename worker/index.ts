@@ -36,7 +36,7 @@ function setup(env: Env) {
 }
 
 /** Public, user-independent GET endpoints that may be served from the edge cache for a minute. */
-const EDGE_CACHEABLE = /^\/api\/(sets(\/[^/]+)?|cards\/[^/]+|search|market\/movers|health|share\/[^/]+|i18n\/[^/]+)$/;
+const EDGE_CACHEABLE = /^\/api\/(sets(\/[^/]+)?|cards\/[^/]+(\/snapshot)?|search|market\/(movers|sales)|catalog\/facets|health|share\/[^/]+|i18n\/[^/]+)$/;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

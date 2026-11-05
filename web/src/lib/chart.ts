@@ -10,11 +10,12 @@ function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, 
   return e;
 }
 
-export interface Series { name: string; points: PricePoint[]; color: string; dashed?: boolean }
+export interface Series { name: string; points: PricePoint[]; color: string; dashed?: boolean; /** scatter instead of a line (e.g. single sales) */ dots?: boolean }
 
-export function lineChart(series: Series[], opts: { height?: number; formatY?: (n: number) => string; emptyText?: string } = {}): SVGSVGElement {
+export function lineChart(series: Series[], opts: { height?: number; formatY?: (n: number) => string; emptyText?: string; minDate?: string } = {}): SVGSVGElement {
   const W = 640, H = opts.height ?? 240, padL = 56, padR = 12, padT = 12, padB = 28;
   const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img" });
+  if (opts.minDate) series = series.map((s) => ({ ...s, points: s.points.filter((p) => p.date >= opts.minDate!) }));
   const all = series.flatMap((s) => s.points);
   if (all.length < 2 || new Set(all.map((p) => p.date)).size < 2) {
     const t = el("text", { x: W / 2, y: H / 2, "text-anchor": "middle", class: "chart-empty" });
@@ -40,15 +41,21 @@ export function lineChart(series: Series[], opts: { height?: number; formatY?: (
   for (let i = 0; i <= ticks; i++) {
     const tms = x0 + ((x1 - x0) * i) / ticks;
     const t = el("text", { x: X(tms), y: H - 8, "text-anchor": i === 0 ? "start" : i === ticks ? "end" : "middle", class: "chart-label" });
-    t.textContent = new Intl.DateTimeFormat(locale(), { day: "2-digit", month: "short" }).format(new Date(tms)); svg.appendChild(t);
+    t.textContent = new Intl.DateTimeFormat(locale(), x1 - x0 > 300 * 86_400_000 ? { month: "short", year: "2-digit" } : { day: "2-digit", month: "short" }).format(new Date(tms)); svg.appendChild(t);
   }
   const hover: ChartPoint[] = [];
-  series.forEach((s, idx) => {
+  let areaDone = false;
+  series.forEach((s) => {
     const pts = [...s.points].sort((a, b) => a.date.localeCompare(b.date));
     if (pts.length < 1) return;
     for (const p of pts) hover.push({ x: X(new Date(p.date).getTime()), y: Y(p.value), date: p.date, value: p.value, series: s.name, color: s.color });
+    if (s.dots) {
+      for (const p of pts) svg.appendChild(el("circle", { cx: X(new Date(p.date).getTime()), cy: Y(p.value), r: 3.2, fill: s.color, opacity: 0.85, class: "chart-sale" }));
+      return;
+    }
     const d = pts.map((p, i) => `${i ? "L" : "M"}${X(new Date(p.date).getTime()).toFixed(1)},${Y(p.value).toFixed(1)}`).join(" ");
-    if (idx === 0 && pts.length > 1) {
+    if (!areaDone && pts.length > 1) {
+      areaDone = true;
       const area = el("path", { d: `${d} L${X(new Date(pts[pts.length - 1]!.date).getTime()).toFixed(1)},${Y(y0)} L${X(new Date(pts[0]!.date).getTime()).toFixed(1)},${Y(y0)} Z`, fill: s.color, opacity: 0.08 });
       svg.appendChild(area);
     }

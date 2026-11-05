@@ -67,9 +67,12 @@ export async function summary(db: SqlDb, userId: number): Promise<PortfolioSumma
   let totalValue = 0, totalCost = 0, itemCount = 0;
   const byLang = new Map<string, { value: number; count: number }>();
   const bySet = new Map<string, { name: string; value: number; count: number }>();
+  const byKind = new Map<string, { value: number; count: number }>();
   for (const it of items) {
     const v = (it.currentValue ?? 0) * it.quantity;
     totalValue += v; totalCost += (it.purchasePriceEur ?? 0) * it.quantity; itemCount += it.quantity;
+    const kind = it.gradingCompany ?? "raw";
+    const k = byKind.get(kind) ?? { value: 0, count: 0 }; k.value += v; k.count += it.quantity; byKind.set(kind, k);
     const l = byLang.get(it.language) ?? { value: 0, count: 0 }; l.value += v; l.count += it.quantity; byLang.set(it.language, l);
     const s = bySet.get(it.card.setId) ?? { name: it.card.setNameDe ?? it.card.setNameEn ?? it.card.setId, value: 0, count: 0 }; s.value += v; s.count += it.quantity; bySet.set(it.card.setId, s);
   }
@@ -96,6 +99,7 @@ export async function summary(db: SqlDb, userId: number): Promise<PortfolioSumma
     change24h: rel(at(1)), change7d: rel(at(7)), change30d: rel(at(30)),
     byLanguage: [...byLang].map(([language, v]) => ({ language: language as Language, value: r2(v.value), count: v.count })).sort((a, b) => b.value - a.value),
     bySet: [...bySet].map(([setId, v]) => ({ setId, setName: v.name, value: r2(v.value), count: v.count })).sort((a, b) => b.value - a.value).slice(0, 10),
+    byKind: [...byKind].map(([kind, v]) => ({ kind, value: r2(v.value), count: v.count })).sort((a, b) => b.value - a.value),
     topHoldings, movers, history, insights: buildInsights(items, totalValue, totalCost, rel(at(30))),
   };
 }

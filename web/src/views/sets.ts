@@ -5,6 +5,7 @@ import { state } from "../lib/store.ts";
 import { cardTile, empty, section } from "../components/ui.ts";
 import { reveal } from "../lib/fx.ts";
 import { tr } from "../lib/i18n.ts";
+import { hoverToggle } from "../components/hover.ts";
 
 export async function sets(): Promise<HTMLElement> {
   const all = (await api.sets()).items.filter((s) => s.cardsLoaded > 0 || (s.cardCountOfficial ?? 0) > 0);
@@ -53,7 +54,7 @@ export async function setView(params: Record<string, string>, query: URLSearchPa
       set.logo ? h("img", { class: "set-hero-logo", src: `${set.logo}.webp`, alt: "" }) : null),
     state.user ? h("div", { class: "stats compact" }, h("div", { class: "stat" }, h("span", { class: "stat-title" }, tr("Im Besitz")), h("strong", { class: "stat-value" }, `${owned.size} / ${set.cardCountOfficial ?? cards.length}`)),
       h("div", { class: "stat" }, h("span", { class: "stat-title" }, tr("Fortschritt")), h("strong", { class: "stat-value" }, `${Math.round((owned.size / Math.max(1, set.cardCountOfficial ?? cards.length)) * 100)} %`))) : null,
-    h("div", { class: "search-bar" }, sortSel, state.user ? onlyMissing : null),
+    h("div", { class: "search-bar" }, sortSel, state.user ? onlyMissing : null, h("span", { class: "spacer" }), hoverToggle()),
     grid,
   );
 }

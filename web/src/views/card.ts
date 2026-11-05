@@ -1,9 +1,9 @@
 import type { CardDetail, PricePoint } from "../../../shared/types.ts";
 import { h, svg, icons, fmt, label, cardImage, cardName, clear, toast, imgOr } from "../lib/dom.ts";
 import { api } from "../lib/api.ts";
-import { lineChart } from "../lib/chart.ts";
 import { state } from "../lib/store.ts";
 import { addToCollection, confidenceBadge, empty, quoteRow, reportSale, section, trendPill, placeholder, requireLogin } from "../components/ui.ts";
+import { historyPanel, valueLadders } from "../components/history.ts";
 import { tr } from "../lib/i18n.ts";
 
 export async function cardView(params: Record<string, string>): Promise<HTMLElement> {
@@ -51,13 +51,8 @@ function build(card: CardDetail, update: (c: CardDetail) => void): HTMLElement[]
     ),
   );
 
-  const ownHistory = card.history.filter((p) => !p.source && p.language === "de" && p.variant === primaryVariant(card));
-  const cmHistory = card.history.filter((p) => p.source === "cardmarket");
-  const series = [];
-  if (ownHistory.length) series.push({ name: "Marktwert Deutsch", points: ownHistory, color: "var(--c-brand)" });
-  if (cmHistory.length) series.push({ name: "Cardmarket Trend (alle Sprachen)", points: cmHistory, color: "var(--c-blue)", dashed: true });
-  const chart = section(tr("Preisverlauf"), lineChart(series, { formatY: (n) => fmt.eurCompact(n), emptyText: tr("Der Preisverlauf baut sich ab heute täglich auf.") }),
-    h("div", { class: "legend inline" }, ...series.map((s) => h("span", null, h("i", { style: { background: s.color } }), s.name))));
+  const chart = historyPanel(card);
+  const ladders = section(tr("Wert nach Zustand & Bewertung"), valueLadders(card));
 
   const quotes = section(tr("Alle Bewertungen"), card.prices.length ? h("div", { class: "quotes" }, ...[...de, ...en, ...others].map(quoteRow)) : h("p", { class: "muted" }, tr("Noch keine Bewertungen.")));
 
@@ -68,25 +63,25 @@ function build(card: CardDetail, update: (c: CardDetail) => void): HTMLElement[]
           h("td", null, s.url ? h("a", { href: s.url, target: "_blank", rel: "noopener" }, sourceLabel(s.source), " ", svg(icons.external, 12)) : sourceLabel(s.source), s.verified ? h("span", { class: "chip ok", title: "verifiziert" }, "✓") : null)))))
     : h("div", null, h("p", { class: "muted" }, tr("Noch keine Verkäufe für diese Karte erfasst. Verkäufe von eBay.de werden laufend eingelesen – wertvolle und beobachtete Karten zuerst.")), h("button", { class: "btn ghost", onClick: () => reportSale(card, update) }, tr("Verkauf melden"))));
 
-  const graded = section(tr("Bewertete Karten (PSA · CGC · BGS)"), card.graded.length
-    ? h("div", null,
+  const gradedSales = card.graded.filter((g) => g.method === "sales");
+  const graded = gradedSales.length ? section(tr("Bewertete Verkäufe im Detail"),
         h("table", { class: "table" }, h("thead", null, h("tr", null, h("th", null, tr("Grade")), h("th", null, tr("Wert")), h("th", null, tr("Spanne")), h("th", null, tr("Verkäufe")), h("th", null, tr("Letzter Verkauf")))),
-          h("tbody", null, ...card.graded.map((g) => h("tr", null,
+          h("tbody", null, ...gradedSales.map((g) => h("tr", null,
             h("td", null, h("b", null, `${g.company} ${g.grade}`)),
-            h("td", null, h("b", null, fmt.eur(g.value)), g.method === "multiplier" ? h("span", { class: "chip", title: tr("Keine Verkäufe dieser Bewertung erfasst – Schätzung aus dem Rohwert") }, tr("Schätzung")) : null),
+            h("td", null, h("b", null, fmt.eur(g.value))),
             h("td", null, g.low != null ? `${fmt.eur(g.low)} – ${fmt.eur(g.high)}` : "–"),
-            h("td", null, g.method === "sales" ? tr("{gn} ({gn90} in 90 T.)", { gn: g.n, gn90: g.n90 }) : "–"),
+            h("td", null, tr("{gn} ({gn90} in 90 T.)", { gn: g.n, gn90: g.n90 })),
             h("td", null, g.lastSoldAt ? fmt.date(g.lastSoldAt) : "–"))))),
-        h("p", { class: "muted small" }, tr("Werte mit Verkäufen: zeitgewichteter Median echter Verkäufe dieser Bewertung (180 Tage, Ausreißer entfernt). „Schätzung“ = Rohwert × typischer Aufschlag, bis Verkäufe vorliegen.")))
-    : h("p", { class: "muted" }, tr("Noch keine Verkäufe bewerteter Exemplare erfasst.")));
+        h("p", { class: "muted small" }, tr("Zeitgewichteter Median echter Verkäufe dieser Bewertung (180 Tage, Ausreißer entfernt)."))) : null;
 
   const details = section(tr("Details"), h("dl", { class: "dl" },
     dd(tr("Set"), h("a", { href: `/sets/${encodeURIComponent(card.setId)}` }, card.setNameDe ?? card.setNameEn ?? card.setId)), dd(tr("Nummer"), card.localId), dd(tr("Seltenheit"), card.rarity ?? "–"),
     dd(tr("Kategorie"), card.category ?? "–"), card.hp ? dd("KP", String(card.hp)) : null, card.types.length ? dd(tr("Typ"), card.types.join(", ")) : null,
     dd(tr("Illustrator"), card.illustrator ?? "–"), dd(tr("Varianten"), Object.entries(card.variants).filter(([, v]) => v).map(([k]) => label.variant(k)).join(", ") || "–"),
-    dd(tr("Cardmarket-Zuordnung"), card.cmProductId ? `${card.cmMatchMethod === "tcgdex" ? "exakt" : tr("per Name")} (#${card.cmProductId})` : "offen"), dd(tr("Katalog-ID"), card.id)));
+    dd(tr("Cardmarket-Zuordnung"), card.cmProductId ? `${card.cmMatchMethod === "tcgdex" ? "exakt" : tr("per Name")} (#${card.cmProductId})` : "offen"),
+    dd("TCGplayer", card.tcgpProductId ? h("a", { href: `https://www.tcgplayer.com/product/${card.tcgpProductId}`, target: "_blank", rel: "noopener" }, `#${card.tcgpProductId} `, svg(icons.external, 12)) : "–"), dd(tr("Katalog-ID"), card.id)));
 
-  return [head, hero, chart, h("div", { class: "grid-2" }, quotes, details), graded, sales];
+  return [head, hero, chart, ladders, h("div", { class: "grid-2" }, quotes, details), ...(graded ? [graded] : []), sales];
 }
 
 function gv(lbl: string, v: number | null): HTMLElement | null { return v == null ? null : h("div", null, h("span", null, lbl), h("b", null, fmt.eur(v))); }

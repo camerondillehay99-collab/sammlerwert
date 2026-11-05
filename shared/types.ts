@@ -82,9 +82,15 @@ export interface CardDetail extends CardSummary {
   prices: PriceQuote[];
   guide: CardmarketGuidePoint | null;
   history: PricePoint[];
+  /** full daily series per source/variant (TCGplayer since 2024, Cardmarket + Sammlerwert since launch) */
+  series: PriceSeries[];
+  /** TCGplayer product id (English print) when matched */
+  tcgpProductId: number | null;
   sales: SaleRecord[];
   /** value per grading company and grade, from real graded sales (method "sales") or estimated (method "multiplier") */
   graded: GradedValue[];
+  /** condition ladder NM → DMG */
+  conditions: ConditionValue[];
 }
 
 export interface GradedValue {
@@ -102,6 +108,28 @@ export interface CardmarketGuidePoint {
 
 export interface PricePoint { date: string; value: number; language?: Language; variant?: Variant; source?: string }
 
+/** A full daily price series for a card (compact tuples), already converted to EUR. */
+export interface PriceSeries {
+  key: string;                                  // "<source>|<language>|<variant>"
+  source: "tcgplayer" | "cardmarket" | "sammlerwert";
+  label: string;
+  language: Language | "all";
+  variant: Variant;
+  currency: "EUR";
+  points: Array<[date: string, value: number]>;
+}
+
+/** Value per condition on the US scale (NM/LP/MP/HP/DMG) with the Cardmarket equivalents; estimated from NM until sales exist. */
+export interface ConditionValue {
+  code: "NM" | "LP" | "MP" | "HP" | "DMG";
+  cardmarket: Condition[];
+  label: string;
+  multiplier: number;
+  value: number | null;
+  n: number;                                    // sales in that bucket (180 days)
+  method: "sales" | "estimate";
+}
+
 export interface SaleRecord {
   id: number;
   cardId: string;
@@ -118,6 +146,11 @@ export interface SaleRecord {
   url: string | null;
   verified: boolean;
 }
+
+/** One sale in the market feed (sale + the card it belongs to). */
+export interface SaleFeedItem extends SaleRecord { card: CardSummary }
+
+export interface CatalogFacets { rarities: Array<{ value: string; n: number }>; categories: Array<{ value: string; n: number }> }
 
 export interface Collection {
   id: number; name: string; isDefault: boolean; description: string | null; color: string | null; shareToken: string | null; sortOrder: number; createdAt: string;
@@ -156,6 +189,8 @@ export interface PortfolioSummary {
   change30d: number | null;
   byLanguage: Array<{ language: Language; value: number; count: number }>;
   bySet: Array<{ setId: string; setName: string; value: number; count: number }>;
+  /** raw vs. graded (per company) */
+  byKind: Array<{ kind: string; value: number; count: number }>;
   topHoldings: CollectionItem[];
   movers: Array<{ item: CollectionItem; change30: number }>;
   history: PricePoint[];

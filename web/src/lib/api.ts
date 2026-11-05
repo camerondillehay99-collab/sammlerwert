@@ -1,4 +1,4 @@
-import type { AuthResponse, CardDetail, CardSummary, Collection, CollectionItem, PortfolioSummary, ScanResultPublic, SetSummary, User } from "../../../shared/types.ts";
+import type { AuthResponse, CardDetail, CardSummary, CatalogFacets, Collection, CollectionItem, PortfolioSummary, SaleFeedItem, ScanResultPublic, SetSummary, User } from "../../../shared/types.ts";
 
 export class HttpError extends Error { constructor(public status: number, message: string, public code?: string) { super(message); } }
 
@@ -69,10 +69,19 @@ export const api = {
   psaCert: (cert: string) => call<{ cert: PsaCertPublic; facts: Record<string, unknown>; best: { card: CardSummary; score: number; reasons: string[] } | null; alternatives: Array<{ card: CardSummary }> }>("POST", "/api/psa/cert", { cert }),
   logout: () => call<{ ok: true }>("POST", "/api/auth/logout"),
   updateMe: (patch: { name?: string; locale?: string }) => call<{ user: Me }>("PATCH", "/api/auth/me", patch),
-  search: (q: string, opts: { set?: string | null; sort?: string; limit?: number; offset?: number } = {}) => {
+  search: (q: string, opts: { set?: string | null; sort?: string; limit?: number; offset?: number; rarity?: string | null; category?: string | null; min?: string | null; max?: string | null; priced?: boolean; ids?: string[] | null } = {}) => {
     const p = new URLSearchParams({ q });
     if (opts.set) p.set("set", opts.set); if (opts.sort) p.set("sort", opts.sort); if (opts.limit) p.set("limit", String(opts.limit)); if (opts.offset) p.set("offset", String(opts.offset));
+    if (opts.rarity) p.set("rarity", opts.rarity); if (opts.category) p.set("category", opts.category); if (opts.min) p.set("min", opts.min); if (opts.max) p.set("max", opts.max); if (opts.priced) p.set("priced", "1");
+    if (opts.ids) p.set("ids", opts.ids.join(","));
     return cached<{ items: CardSummary[]; total: number }>(`/api/search?${p}`);
+  },
+  facets: () => cached<CatalogFacets>("/api/catalog/facets", 3_600_000),
+  snapshot: (id: string) => cached<unknown>(`/api/cards/${encodeURIComponent(id)}/snapshot`, 300_000),
+  salesFeed: (opts: { grader?: string | null; grade?: string | null; condition?: string | null; set?: string | null; graded?: "1" | "0" | null; min?: string | null; limit?: number; offset?: number } = {}) => {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(opts)) if (v != null && v !== "") p.set(k, String(v));
+    return cached<{ items: SaleFeedItem[]; total: number }>(`/api/market/sales?${p}`, 60_000);
   },
   sets: () => cached<{ items: SetSummary[] }>("/api/sets", 300_000),
   set: (id: string, sort = "number") => cached<{ set: SetSummary; cards: CardSummary[] }>(`/api/sets/${encodeURIComponent(id)}?sort=${sort}`, 120_000),

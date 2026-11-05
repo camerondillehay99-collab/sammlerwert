@@ -6,8 +6,9 @@ import { state } from "../lib/store.ts";
 import { navigate } from "../lib/router.ts";
 import { tilt, tip, countUp } from "../lib/fx.ts";
 import { tr } from "../lib/i18n.ts";
+import { attachSnapshot } from "./hover.ts";
 
-export function cardTile(card: CardSummary, opts: { value?: number | null; sub?: string; trend?: number | null; onClick?: () => void } = {}): HTMLElement {
+export function cardTile(card: CardSummary, opts: { value?: number | null; sub?: string; trend?: number | null; onClick?: () => void; snapshot?: boolean } = {}): HTMLElement {
   const img = cardImage(card);
   const value = opts.value !== undefined ? opts.value : card.valueDe;
   const trend = opts.trend !== undefined ? opts.trend : card.trend30;
@@ -22,6 +23,7 @@ export function cardTile(card: CardSummary, opts: { value?: number | null; sub?:
     ),
   );
   tilt(el);
+  if (opts.snapshot !== false) attachSnapshot(el, card);
   return el;
 }
 

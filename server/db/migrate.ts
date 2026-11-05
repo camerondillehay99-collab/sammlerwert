@@ -16,11 +16,14 @@ const COLUMNS: Array<[table: string, column: string, ddl: string]> = [
   ["collections", "color", "TEXT"],
   ["collections", "sort_order", "INTEGER NOT NULL DEFAULT 0"],
   ["collection_items", "source", "TEXT"],
+  ["cards", "tcgp_product_id", "INTEGER"],
 ];
 
 const TABLES: string[] = [
   `CREATE TABLE IF NOT EXISTS psa_certs (cert_no TEXT PRIMARY KEY, fetched_at TEXT NOT NULL, payload TEXT NOT NULL, card_id TEXT)`,
   `CREATE TABLE IF NOT EXISTS ui_translations (lang TEXT NOT NULL, key TEXT NOT NULL, text TEXT NOT NULL, PRIMARY KEY (lang, key))`,
+  `CREATE TABLE IF NOT EXISTS tcgp_groups (group_id INTEGER PRIMARY KEY, set_id TEXT, name TEXT, abbreviation TEXT, published_on TEXT, products INTEGER, matched INTEGER, updated_at TEXT)`,
+  `CREATE TABLE IF NOT EXISTS price_series (card_id TEXT NOT NULL, source TEXT NOT NULL, variant TEXT NOT NULL, currency TEXT NOT NULL DEFAULT 'USD', points TEXT NOT NULL DEFAULT '', first_date TEXT, last_date TEXT, n INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, PRIMARY KEY (card_id, source, variant))`,
 ];
 
 let done: Promise<string[]> | null = null;

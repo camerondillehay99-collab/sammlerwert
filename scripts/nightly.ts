@@ -20,6 +20,9 @@ import { recomputeFactors } from "../server/pricing/engine.ts";
 import { purgeExcludedSeries, rebuildFts } from "../server/ingest/tcgdex.ts";
 import { migrate } from "../server/db/migrate.ts";
 import { catalogStats } from "../server/services/catalog.ts";
+import { TCGCSV_FIRST_ARCHIVE, matchCardsToTcgplayer, refreshTcgplayerDaily } from "../server/ingest/tcgplayer.ts";
+import { ensureFx } from "../server/ingest/fx.ts";
+import { runTcgpBackfill } from "./tcgp-backfill.ts";
 
 const log = (m: string) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${m}`);
 const env = process.env;
@@ -30,7 +33,9 @@ if (!accountId || !apiToken || !databaseId) { console.error("CLOUDFLARE_ACCOUNT_
 
 applyEnv({ ...env, INGEST_DELAY_MS: env.INGEST_DELAY_MS ?? "40", CATALOG_COMPLETION_BATCH: env.DETAIL_BATCH ?? "2500" });
 const db = new D1HttpDb({ accountId, databaseId, apiToken });
-const steps = new Set((env.STEPS ?? "details,catalog,guide,ebay,factors").split(","));
+// An empty workflow input arrives as "" on scheduled runs – fall back to the full default list then.
+const DEFAULT_STEPS = "details,catalog,guide,tcgp,fx,ebay,factors,tcgp_backfill";
+const steps = new Set((env.STEPS?.trim() || DEFAULT_STEPS).split(",").map((s) => s.trim()).filter(Boolean));
 const weekday = new Date().getUTCDay();
 const t0 = Date.now();
 
@@ -62,8 +67,20 @@ CREATE TABLE IF NOT EXISTS deploy_patches (id INTEGER PRIMARY KEY AUTOINCREMENT,
     log(`Preisguide: ${JSON.stringify(await refreshCardmarketFromNetwork(db, { products: false, guideOnlyLinked: true }))}`);
     log(`Zuordnung: ${JSON.stringify(await matchCardsToCardmarket(db))}`);
   }
+  if (steps.has("tcgp") || steps.has("tcgp_match") || steps.has("tcgp_backfill")) {
+    // English-market history (TCGplayer via TCGCSV): link cards to products weekly / when nothing is linked yet, then append today's point.
+    const linked = (await db.first<{ n: number }>("SELECT COUNT(*) n FROM cards WHERE tcgp_product_id IS NOT NULL"))!.n;
+    if (steps.has("tcgp_match") || !linked || weekday === 1 || env.FORCE_CATALOG === "1") log(`TCGplayer-Zuordnung: ${JSON.stringify(await matchCardsToTcgplayer(db, log, { onlyUnmatchedSets: linked > 0 && !steps.has("tcgp_match") }))}`);
+    if (steps.has("tcgp")) log(`TCGplayer heute: ${JSON.stringify(await refreshTcgplayerDaily(db, log))}`);
+  }
+  if (steps.has("fx")) log(`Wechselkurse USD→EUR: ${await ensureFx(db, TCGCSV_FIRST_ARCHIVE)} Tage`);
   if (steps.has("ebay") && ebayConfigured()) log(`eBay: ${JSON.stringify(await runEbayIngest(db, undefined, log))}`);
   if (steps.has("factors")) log(`Sprachfaktoren: ${JSON.stringify(await recomputeFactors(db))}`);
+  if (steps.has("tcgp_backfill")) {
+    // Resumable: as many archive days as fit into the remaining budget (workflow timeout is 45 min), cursor in meta.
+    const minutes = Number(env.BACKFILL_MINUTES ?? "0") || Math.max(5, 38 - (Date.now() - t0) / 60_000);
+    log(`TCGplayer-Backfill: ${JSON.stringify(await runTcgpBackfill(db, { budgetMs: minutes * 60_000 }, log))}`);
+  }
 
   await db.run("INSERT INTO job_runs(job, started_at, finished_at, status, detail) VALUES ('nightly', ?, ?, 'ok', ?)",
     [new Date(t0).toISOString(), new Date().toISOString(), JSON.stringify(db.stats)]);

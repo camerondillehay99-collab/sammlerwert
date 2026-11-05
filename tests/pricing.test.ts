@@ -117,14 +117,16 @@ describe("gradedValues", () => {
     expect(psa10.value).toBeGreaterThan(280); expect(psa10.value).toBeLessThan(330); // the 3000 € outlier is trimmed
     const psa9 = out.find((g) => g.company === "PSA" && g.grade === 9)!;
     expect(psa9.method).toBe("sales"); expect(psa9.n).toBe(2);
-    expect(out.find((g) => g.company === "BGS")).toBeUndefined(); // a single sale is not a value
+    expect(out.find((g) => g.company === "BGS" && g.method === "sales")).toBeUndefined(); // a single sale is not a value
     expect(out[0]!.company).toBe("PSA"); expect(out[0]!.grade).toBe(10); // sorted PSA first, highest grade first
   });
   test("multiplier estimates only when no sales exist and the raw value is meaningful", () => {
     const est = gradedValues([], 40, now);
-    expect(est.map((g) => `${g.company} ${g.grade} ${g.method}`)).toEqual(["PSA 10 multiplier", "PSA 9 multiplier"]);
+    expect(est.every((g) => g.method === "multiplier")).toBe(true);
+    expect(est.slice(0, 3).map((g) => `${g.company} ${g.grade}`)).toEqual(["PSA 10", "PSA 9", "PSA 8"]);
+    expect(new Set(est.map((g) => g.company))).toEqual(new Set(["PSA", "BGS", "CGC", "TAG"]));
     expect(est[0]!.value).toBeCloseTo(120, 5);
-    expect(gradedValues([], 2, now)).toEqual([]);
+    expect(gradedValues([], 1, now)).toEqual([]);
     expect(gradedValues([sale(50, 400), sale(55, 390)], null, now)).toEqual([]); // too old
   });
 });

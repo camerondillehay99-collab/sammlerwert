@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS cards (
   cm_product_id INTEGER,
   cm_match_method TEXT,
   cm_match_confidence REAL,
+  tcgp_product_id INTEGER,           -- TCGplayer product (English print) – price history source
   updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_cards_set ON cards(set_id);
@@ -283,4 +284,30 @@ CREATE TABLE IF NOT EXISTS ui_translations (
   key TEXT NOT NULL,
   text TEXT NOT NULL,
   PRIMARY KEY (lang, key)
+);
+
+-- ---------- Price history backbone ----------
+-- TCGplayer groups (sets) from TCGCSV, linked to our sets.
+CREATE TABLE IF NOT EXISTS tcgp_groups (
+  group_id INTEGER PRIMARY KEY,
+  set_id TEXT,
+  name TEXT,
+  abbreviation TEXT,
+  published_on TEXT,
+  products INTEGER,
+  matched INTEGER,
+  updated_at TEXT
+);
+-- One packed daily series per card/source/variant: points = "YYYYMMDD:price;…" ascending (source currency).
+CREATE TABLE IF NOT EXISTS price_series (
+  card_id TEXT NOT NULL,
+  source TEXT NOT NULL,              -- tcgplayer | …
+  variant TEXT NOT NULL,             -- normal | holo | reverse | firstEdition
+  currency TEXT NOT NULL DEFAULT 'USD',
+  points TEXT NOT NULL DEFAULT '',
+  first_date TEXT,
+  last_date TEXT,
+  n INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (card_id, source, variant)
 );
