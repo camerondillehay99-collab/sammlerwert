@@ -12,6 +12,9 @@ function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, 
 
 export interface Series { name: string; points: PricePoint[]; color: string; dashed?: boolean; /** scatter instead of a line (e.g. single sales) */ dots?: boolean }
 
+/** Longest hole (days) a line bridges before it is split into segments. */
+const GAP_DAYS = 45;
+
 export function lineChart(series: Series[], opts: { height?: number; formatY?: (n: number) => string; emptyText?: string; minDate?: string } = {}): SVGSVGElement {
   const W = 640, H = opts.height ?? 240, padL = 56, padR = 12, padT = 12, padB = 28;
   const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img" });
@@ -53,12 +56,18 @@ export function lineChart(series: Series[], opts: { height?: number; formatY?: (
       for (const p of pts) svg.appendChild(el("circle", { cx: X(new Date(p.date).getTime()), cy: Y(p.value), r: 3.2, fill: s.color, opacity: 0.85, class: "chart-sale" }));
       return;
     }
-    const d = pts.map((p, i) => `${i ? "L" : "M"}${X(new Date(p.date).getTime()).toFixed(1)},${Y(p.value).toFixed(1)}`).join(" ");
+    // Break the line where the data has a hole longer than GAP_DAYS (history still importing, delisted product) instead of
+    // drawing a misleading straight bridge; the area fill follows the same segments.
+    const d = pts.map((p, i) => `${i && new Date(p.date).getTime() - new Date(pts[i - 1]!.date).getTime() <= GAP_DAYS * 86_400_000 ? "L" : "M"}${X(new Date(p.date).getTime()).toFixed(1)},${Y(p.value).toFixed(1)}`).join(" ");
     if (!areaDone && pts.length > 1) {
       areaDone = true;
-      const area = el("path", { d: `${d} L${X(new Date(pts[pts.length - 1]!.date).getTime()).toFixed(1)},${Y(y0)} L${X(new Date(pts[0]!.date).getTime()).toFixed(1)},${Y(y0)} Z`, fill: s.color, opacity: 0.08 });
+      const segs = d.split(" M").map((seg, i) => (i ? "M" : "") + seg).filter((seg) => seg.includes("L"));
+      const area = el("path", { d: segs.map((seg) => { const m = seg.match(/^M([\d.]+),[\d.]+(?:.*L([\d.]+),[\d.]+)$/); return m ? `${seg} L${m[2]},${Y(y0)} L${m[1]},${Y(y0)} Z` : ""; }).join(" "), fill: s.color, opacity: 0.08 });
       svg.appendChild(area);
     }
+    // Points without a neighbour inside GAP_DAYS would vanish from a split line – draw them as dots.
+    const near = (a: PricePoint, b: PricePoint | undefined) => !!b && Math.abs(new Date(a.date).getTime() - new Date(b.date).getTime()) <= GAP_DAYS * 86_400_000;
+    pts.forEach((p, i) => { if (!near(p, pts[i - 1]) && !near(p, pts[i + 1])) svg.appendChild(el("circle", { cx: X(new Date(p.date).getTime()), cy: Y(p.value), r: 2.6, fill: s.color })); });
     svg.appendChild(el("path", { d, fill: "none", stroke: s.color, "stroke-width": 2.2, "stroke-dasharray": s.dashed ? "5 5" : "", "stroke-linejoin": "round", "stroke-linecap": "round" }));
     const last = pts[pts.length - 1]!;
     svg.appendChild(el("circle", { cx: X(new Date(last.date).getTime()), cy: Y(last.value), r: 3.5, fill: s.color }));

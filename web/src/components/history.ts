@@ -20,6 +20,13 @@ export function historyPanel(card: CardDetail): HTMLElement {
   const series = card.series ?? [];
   const hasData = series.some((s) => s.points.length >= 2) || card.sales.length > 0;
   let range = safeGet("sw-range") ?? "1y";
+  // Auto-widen the initial range to the narrowest one that actually holds ≥2 points (a card whose history is still
+  // importing would otherwise open on an empty chart); an explicit click afterwards is always respected.
+  const pointsSince = (days: number | null) => { const min = days ? new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10) : ""; return new Set(series.flatMap((s) => s.points.map(([d]) => d)).filter((d) => d >= min)).size; };
+  if (pointsSince(RANGES.find((r) => r[0] === range)?.[1] ?? null) < 2) {
+    const from = Math.max(0, RANGES.findIndex((r) => r[0] === range));
+    range = RANGES.slice(from).find(([, days]) => pointsSince(days) >= 2)?.[0] ?? "max";
+  }
   const hidden = new Set<string>((safeGet("sw-series-off") ?? "").split("|").filter(Boolean));
   // Default view: the primary Sammlerwert curve plus TCGplayer for the card's main variant; other variants off until toggled.
   const primaryTcg = series.filter((s) => s.source === "tcgplayer").sort((a, b) => b.points.length - a.points.length)[0];
