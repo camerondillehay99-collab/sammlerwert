@@ -13,7 +13,8 @@ import { tr } from "../lib/i18n.ts";
 export const RANGES: Array<[key: string, days: number | null, label: string]> = [["1m", 30, "1M"], ["3m", 91, "3M"], ["6m", 182, "6M"], ["1y", 365, "1J"], ["max", null, "MAX"]];
 const COLORS: Record<string, string> = { sammlerwert: "var(--c-brand)", cardmarket: "var(--c-blue)", tcgplayer: "var(--c-violet)" };
 
-type Scale = { kind: "raw"; code: string; mult: number; label: string } | { kind: "graded"; company: string; grade: number; mult: number; label: string };
+/** Which real sales to plot as dots: all, one raw condition rung, or one grade. */
+type SalesFilter = { kind: "all"; label: string } | { kind: "raw"; code: string; cardmarket: string[]; label: string } | { kind: "graded"; company: string; grade: number; label: string };
 
 export function historyPanel(card: CardDetail): HTMLElement {
   const root = h("section", { class: "panel history" });
@@ -31,17 +32,18 @@ export function historyPanel(card: CardDetail): HTMLElement {
   // Default view: the primary Sammlerwert curve plus TCGplayer for the card's main variant; other variants off until toggled.
   const primaryTcg = series.filter((s) => s.source === "tcgplayer").sort((a, b) => b.points.length - a.points.length)[0];
   for (const s of series) if (s.source === "tcgplayer" && s !== primaryTcg && !safeGet("sw-series-off")) hidden.add(s.key);
-  let scale: Scale = { kind: "raw", code: "NM", mult: 1, label: "Near Mint" };
+  let filter: SalesFilter = { kind: "all", label: tr("Alle Verkäufe") };
 
-  const nm = card.conditions.find((c) => c.code === "NM")?.value ?? null;
-  const scaleOptions: Scale[] = [
-    ...card.conditions.map((c) => ({ kind: "raw" as const, code: c.code, mult: c.multiplier, label: `${c.label} (${c.code})` })),
-    ...card.graded.filter((g) => nm).map((g) => ({ kind: "graded" as const, company: g.company, grade: g.grade, mult: nm ? g.value / nm : 1, label: `${g.company} ${g.grade}` })),
+  // Sales filter: the rungs/grades that actually have sales for this card.
+  const filterOptions: SalesFilter[] = [
+    { kind: "all", label: tr("Alle Verkäufe") },
+    ...card.conditions.filter((c) => c.n > 0 || c.value != null).map((c) => ({ kind: "raw" as const, code: c.code, cardmarket: c.cardmarket as string[], label: `${c.label} (${c.code})` })),
+    ...card.graded.map((g) => ({ kind: "graded" as const, company: g.company, grade: g.grade, label: `${g.company} ${g.grade}` })),
   ];
-  const scaleSel = h("select", { class: "sel-sm", "aria-label": tr("Zustand oder Bewertung") },
-    h("optgroup", { label: tr("Zustand (roh)") }, ...scaleOptions.filter((o) => o.kind === "raw").map((o) => h("option", { value: scaleKey(o) }, o.label))),
-    scaleOptions.some((o) => o.kind === "graded") ? h("optgroup", { label: tr("Bewertet") }, ...scaleOptions.filter((o) => o.kind === "graded").map((o) => h("option", { value: scaleKey(o) }, o.label))) : null) as HTMLSelectElement;
-  scaleSel.addEventListener("change", () => { scale = scaleOptions.find((o) => scaleKey(o) === scaleSel.value) ?? scale; draw(); });
+  const scaleSel = h("select", { class: "sel-sm", "aria-label": tr("Verkäufe filtern") },
+    ...filterOptions.map((o) => h("option", { value: filterKey(o) }, o.label))) as HTMLSelectElement;
+  scaleSel.addEventListener("change", () => { filter = filterOptions.find((o) => filterKey(o) === scaleSel.value) ?? filter; draw(); });
+  if (filterOptions.length <= 1) scaleSel.hidden = true;
 
   const rangeBar = h("div", { class: "seg ranges", role: "tablist" });
   const toggles = h("div", { class: "chips series-toggles" });
@@ -55,9 +57,10 @@ export function historyPanel(card: CardDetail): HTMLElement {
   }
   function draw() {
     rangeBar.replaceChildren(...RANGES.map(([k, , l]) => h("button", { class: k === range ? "active" : "", role: "tab", "aria-selected": String(k === range), onClick: () => { range = k; safeSet("sw-range", k); draw(); } }, l)));
-    const mult = scale.mult;
-    const visible: Series[] = series.filter((s) => !hidden.has(s.key)).map((s) => ({ name: seriesLabel(s), color: COLORS[s.source] ?? "var(--c-muted)", dashed: s.source === "cardmarket", points: s.points.map(([date, v]) => ({ date, value: Math.round(v * mult * 100) / 100 })) }));
-    const sales = card.sales.filter((s) => scale.kind === "graded" ? s.gradingCompany === scale.company && s.grade === scale.grade : !s.gradingCompany).map((s) => ({ date: s.soldAt.slice(0, 10), value: s.priceEur }));
+    const visible: Series[] = series.filter((s) => !hidden.has(s.key)).map((s) => ({ name: seriesLabel(s), color: COLORS[s.source] ?? "var(--c-muted)", dashed: s.source === "cardmarket", points: s.points.map(([date, v]) => ({ date, value: v })) }));
+    const f = filter;
+    const sales = card.sales.filter((s) => f.kind === "all" ? true : f.kind === "graded" ? s.gradingCompany === f.company && s.grade === f.grade : !s.gradingCompany && !!s.condition && f.cardmarket.includes(s.condition))
+      .map((s) => ({ date: s.soldAt.slice(0, 10), value: s.priceEur, source: `${label.listingType(s.listingType)} · ${label.marketplace(s.source)}` }));
     if (sales.length && !hidden.has("sales")) visible.push({ name: tr("Verkäufe"), color: "var(--c-amber)", dots: true, points: sales });
     chartBox.replaceChildren(lineChart(visible, { height: 260, formatY: (n) => fmt.eurCompact(n), minDate: minDate(), emptyText: hasData ? tr("Keine Datenpunkte in diesem Zeitraum.") : tr("Die Historie füllt sich: TCGplayer-Preise seit Februar 2024 werden gerade importiert, Cardmarket wächst täglich.") }));
     toggles.replaceChildren(
@@ -80,9 +83,7 @@ export function historyPanel(card: CardDetail): HTMLElement {
         );
       }
     }
-    note.textContent = scale.kind === "raw" && scale.code === "NM" ? tr("Kurven in Near Mint. TCGplayer = englischer Markt (USD, tageweise in EUR umgerechnet); Cardmarket = alle Sprachen; Marktwert Deutsch = Cardmarket × gelernter Sprachfaktor.")
-      : scale.kind === "raw" ? tr("{scalelabel}: Kurven aus dem NM-Verlauf × {mult} geschätzt, bis genug Verkäufe in diesem Zustand vorliegen.", { scalelabel: scale.label, mult: `${Math.round(scale.mult * 100)} %` })
-      : tr("{scalelabel}: Kurven × {mult} des Rohwerts – Schätzung aus dem Aufschlag dieser Bewertung; echte Verkäufe als Punkte.", { scalelabel: scale.label, mult: `${Math.round(scale.mult * 100)} %` });
+    note.textContent = tr("Punkte = echte Verkäufe (Auktion / Sofortkauf). Linien = Marktpreise als Referenz: TCGplayer = englischer Markt (USD, tageweise in EUR umgerechnet); Cardmarket = Preisguide aller Sprachen; Marktpreis Deutsch = Cardmarket × gelernter Sprachfaktor.");
   }
   draw();
   root.append(
@@ -92,7 +93,7 @@ export function historyPanel(card: CardDetail): HTMLElement {
   return root;
 }
 
-const scaleKey = (o: Scale) => (o.kind === "raw" ? `raw:${o.code}` : `g:${o.company}:${o.grade}`);
+const filterKey = (o: SalesFilter) => (o.kind === "all" ? "all" : o.kind === "raw" ? `raw:${o.code}` : `g:${o.company}:${o.grade}`);
 function stat(k: string, v: string | HTMLElement, sub: string): HTMLElement { return h("div", { class: "hstat" }, h("span", null, k), h("b", null, v), h("small", { class: "muted" }, sub)); }
 export function seriesLabel(s: PriceSeries): string {
   if (s.source === "sammlerwert") return tr("Marktwert Deutsch");
@@ -100,19 +101,21 @@ export function seriesLabel(s: PriceSeries): string {
   return `TCGplayer EN · ${label.variant(s.variant)}`;
 }
 
-/** Condition ladder + graded grid: what the card is worth in every state collectors trade in. */
+/** Comps by condition and by grade: the last real sale in every bucket collectors trade in – empty when none exists. */
 export function valueLadders(card: CardDetail): HTMLElement {
+  const compMeta = (date: string | null, type: string | null, source: string | null, n: number) =>
+    h("small", { class: "muted" }, date ? `${label.listingType(type)} · ${label.marketplace(source)} · ${fmt.date(date)}${n > 1 ? ` · ${tr("{n} Verkäufe", { n })}` : ""}` : tr("kein Verkauf erfasst"));
   const conds = h("div", { class: "ladder" }, ...card.conditions.map((c) => h("div", { class: `rung ${c.method}` },
     h("span", { class: "rung-code" }, c.code), h("span", { class: "rung-label" }, c.label, h("small", { class: "muted" }, ` · ${c.cardmarket.join("/")}`)),
-    h("b", null, fmt.eur(c.value)), h("small", { class: "muted" }, c.method === "sales" ? tr("{n} Verkäufe", { n: c.n }) : tr("geschätzt")))));
+    h("b", null, c.value != null ? fmt.eur(c.value) : "–"), compMeta(c.lastSoldAt, c.lastListingType, c.lastSource, c.n))));
   const byCompany = new Map<string, typeof card.graded>();
   for (const g of card.graded) (byCompany.get(g.company) ?? byCompany.set(g.company, []).get(g.company)!).push(g);
   const graded = h("div", { class: "graded-grid" }, ...[...byCompany].map(([company, list]) => h("div", { class: "grader" },
     h("div", { class: "grader-head" }, h("span", { class: `chip grader-${company.toLowerCase()}` }, company)),
-    ...list.map((g) => h("div", { class: `grade ${g.method}` }, h("span", null, g.grade), h("b", null, fmt.eur(g.value)), g.method === "sales" ? h("small", { class: "muted" }, tr("{gn} Verk.", { gn: g.n })) : h("small", { class: "muted" }, tr("Schätzung")))))));
+    ...list.map((g) => h("div", { class: "grade sales" }, h("span", null, g.grade), h("b", null, fmt.eur(g.value)), h("small", { class: "muted" }, `${label.listingType(g.lastListingType)} · ${g.lastSoldAt ? fmt.date(g.lastSoldAt) : ""}`))))));
   return h("div", { class: "ladders" },
-    h("div", null, h("h3", { class: "sub" }, tr("Nach Zustand")), card.conditions.some((c) => c.value != null) ? conds : h("p", { class: "muted" }, tr("Noch kein Rohwert – die Leiter erscheint, sobald ein Preis vorliegt."))),
-    h("div", null, h("h3", { class: "sub" }, tr("Bewertet (PSA · BGS · CGC · TAG)")), card.graded.length ? graded : h("p", { class: "muted" }, tr("Noch keine bewerteten Werte."))),
-    h("p", { class: "muted small" }, tr("„geschätzt“ / „Schätzung“ = aus dem Near-Mint-Wert mit typischen Abschlägen bzw. Aufschlägen abgeleitet. Sobald echte Verkäufe (eBay, Community) in einem Zustand oder einer Note vorliegen, ersetzt deren zeitgewichteter Median die Schätzung.")),
+    h("div", null, h("h3", { class: "sub" }, tr("Nach Zustand")), conds),
+    h("div", null, h("h3", { class: "sub" }, tr("Bewertet (PSA · BGS · CGC · TAG)")), card.graded.length ? graded : h("p", { class: "muted" }, tr("Noch kein Verkauf einer bewerteten Karte erfasst."))),
+    h("p", { class: "muted small" }, tr("Nur echte Verkäufe – keine Schätzungen. Jede Zeile zeigt den letzten Verkauf in diesem Zustand bzw. dieser Note mit Verkaufsart und Marktplatz; die Historie oben zeigt alle Verkäufe als Punkte.")),
   );
 }

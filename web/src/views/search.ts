@@ -4,7 +4,7 @@
  * signed-in user's collection and watchlist ids.
  */
 import type { CardSummary, CatalogFacets, SetSummary } from "../../../shared/types.ts";
-import { h, svg, icons, debounce, clear, fmt, label, cardImage, cardName, imgOr, trendClass } from "../lib/dom.ts";
+import { h, svg, icons, debounce, clear, fmt, label, cardImage, cardName, imgOr, trendClass, saleBadge } from "../lib/dom.ts";
 import { api } from "../lib/api.ts";
 import { navigate } from "../lib/router.ts";
 import { cardTile, empty, spinner, modal, placeholder, confidenceBadge } from "../components/ui.ts";
@@ -150,11 +150,15 @@ function seg<T extends string>(opts: Array<[T, string]>, value: T, onChange: (v:
 
 function listRow(c: CardSummary, price: "de" | "en"): HTMLElement {
   const v = price === "en" ? c.valueEn : c.valueDe;
+  const sale = c.lastSale;
   return h("a", { class: "lrow", href: `/karte/${encodeURIComponent(c.id)}` },
     imgOr(cardImage(c), () => placeholder(c), { alt: cardName(c), width: 60, height: 84 }),
     h("div", { class: "lrow-body" }, h("strong", null, cardName(c)), h("span", { class: "muted" }, `${c.setNameDe ?? c.setNameEn ?? ""} · #${c.localId}${c.rarity ? ` · ${c.rarity}` : ""}`)),
-    h("div", { class: "lrow-conf" }, confidenceBadge(c.confidenceDe)),
-    h("div", { class: "lrow-value" }, h("b", null, fmt.eur(v)), h("span", { class: `trend ${trendClass(c.trend30)}` }, fmt.pct(c.trend30))),
+    h("div", { class: "lrow-conf" }, sale ? saleBadge(sale.listingType) : confidenceBadge(c.confidenceDe)),
+    // Last sold (with how it sold) is the quoted number; the market trend is the fallback and says so.
+    sale
+      ? h("div", { class: "lrow-value sold" }, h("b", null, fmt.eur(sale.priceEur)), h("small", { class: "muted" }, `${sale.gradingCompany ? `${sale.gradingCompany} ${sale.grade}` : sale.condition ? label.condition(sale.condition) : ""} · ${fmt.date(sale.soldAt)}`.replace(/^ · /, "")))
+      : h("div", { class: "lrow-value" }, h("b", null, fmt.eur(v)), h("span", { class: `trend ${trendClass(c.trend30)}` }, fmt.pct(c.trend30)), v != null ? h("small", { class: "muted basis" }, tr("Trend")) : null),
   );
 }
 

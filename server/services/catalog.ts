@@ -1,7 +1,7 @@
 import { conditionLadder, gradedValues } from "../pricing/engine.ts";
 import type { SqlDb } from "../db/adapter.ts";
 import { chunks, placeholders, memo, readMany, stmt } from "../db/adapter.ts";
-import type { CardDetail, CardSummary, CardmarketGuidePoint, Language, PriceQuote, SaleRecord, SetSummary, Variant } from "../../shared/types.ts";
+import type { CardDetail, CardSummary, CardmarketGuidePoint, Language, LastSale, PriceQuote, SaleRecord, SetSummary, Variant } from "../../shared/types.ts";
 import { jsonOr } from "../db/index.ts";
 import { cardHistory, quoteCards, type CardForQuote, type QuoteMap } from "../pricing/quotes.ts";
 import { cardSeries, snapshotFrom, type Snapshot } from "../pricing/history.ts";
@@ -14,14 +14,26 @@ const CARD_SELECT = `
   SELECT c.id, c.set_id, s.name_de AS set_name_de, s.name_en AS set_name_en, c.local_id, c.name_de, c.name_en, c.rarity, c.category, c.image, c.image_en,
          c.cm_product_id, c.variants,
          COALESCE(g.trend, g.avg7, g.avg30, g.avg) * COALESCE(f.factor, fg.factor, 1) AS guide_value,
-         CASE WHEN g.avg30 > 0 AND g.trend IS NOT NULL THEN g.trend / g.avg30 - 1 END AS guide_trend30
+         CASE WHEN g.avg30 > 0 AND g.trend IS NOT NULL THEN g.trend / g.avg30 - 1 END AS guide_trend30,
+         (SELECT json_object('p', x.price_eur, 'd', x.sold_at, 't', x.listing_type, 's', x.source, 'c', x.condition, 'g', x.grading_company, 'n', x.grade, 'u', x.url)
+            FROM sales x WHERE x.card_id = c.id ORDER BY x.sold_at DESC, x.id DESC LIMIT 1) AS last_sale
   FROM cards c
   JOIN sets s ON s.id = c.set_id
   LEFT JOIN cm_price_guide g ON g.id_product = c.cm_product_id AND g.date = (SELECT value FROM meta WHERE key = 'cm_guide_date')
   LEFT JOIN language_factors f ON f.set_id = c.set_id AND f.language = 'de'
   LEFT JOIN language_factors fg ON fg.set_id = '*' AND fg.language = 'de'`;
 
-interface CardRow extends CardForQuote { set_name_de: string | null; set_name_en: string | null; local_id: string; name_de: string | null; name_en: string | null; rarity: string | null; category: string | null; image: string | null; image_en: string | null; guide_value: number | null; guide_trend30: number | null }
+interface CardRow extends CardForQuote { set_name_de: string | null; set_name_en: string | null; local_id: string; name_de: string | null; name_en: string | null; rarity: string | null; category: string | null; image: string | null; image_en: string | null; guide_value: number | null; guide_trend30: number | null; last_sale?: string | null }
+
+function parseLastSale(raw: string | null | undefined): LastSale | null {
+  if (!raw) return null;
+  try {
+    const j = JSON.parse(raw) as { p: number; d: string; t: string | null; s: string; c: string | null; g: string | null; n: number | null; u: string | null };
+    if (!(j.p > 0) || !j.d) return null;
+    return { priceEur: Math.round(j.p * 100) / 100, soldAt: j.d, listingType: (j.t ?? "unknown") as LastSale["listingType"], source: j.s as LastSale["source"],
+      condition: j.c as LastSale["condition"], gradingCompany: j.g as LastSale["gradingCompany"], grade: j.n, url: j.u };
+  } catch { return null; }
+}
 
 function rowToSummary(r: CardRow, quotes?: QuoteMap): CardSummary {
   const de = quotes?.get(`${r.id}|de|*`), en = quotes?.get(`${r.id}|en|*`);
@@ -30,6 +42,7 @@ function rowToSummary(r: CardRow, quotes?: QuoteMap): CardSummary {
     rarity: r.rarity, category: r.category, image: r.image, imageEn: r.image_en,
     valueDe: de?.value ?? (r.guide_value != null ? Math.round(r.guide_value * 100) / 100 : null), valueEn: en?.value ?? null,
     confidenceDe: de?.confidence ?? null, trend30: de?.trend30 ?? r.guide_trend30 ?? null,
+    lastSale: parseLastSale(r.last_sale),
   };
 }
 
@@ -121,12 +134,9 @@ export async function getCardDetail(db: SqlDb, id: string): Promise<CardDetail |
     foilAvg: g.foil_avg, foilLow: g.foil_low, foilTrend: g.foil_trend, foilAvg1: g.foil_avg1, foilAvg7: g.foil_avg7, foilAvg30: g.foil_avg30 } : null;
   const base = rowToSummary(row, quotes);
   const sales = (saleRows as unknown as SaleRow[]).map(saleToRecord);
-  const raw = quotes.get(`${id}|de|*`)?.value ?? quotes.get(`${id}|en|*`)?.value ?? null;
-  // Raw value for the ladders: our German quote, else English, else the newest TCGplayer point (already EUR).
-  const tcgLast = series.find((s) => s.source === "tcgplayer")?.points.at(-1)?.[1] ?? null;
-  const rawAny = raw ?? tcgLast;
-  const graded = gradedValues(sales.filter((s) => s.gradingCompany && s.grade != null).map((s) => ({ price: s.priceEur, soldAt: s.soldAt, company: s.gradingCompany!, grade: s.grade!, verified: s.verified })), rawAny);
-  const conditions = conditionLadder(sales.filter((s) => !s.gradingCompany).map((s) => ({ price: s.priceEur, soldAt: s.soldAt, condition: s.condition })), rawAny);
+  // Comps only: graded grades and condition rungs come from real sales (last sold + median), never from multipliers.
+  const graded = gradedValues(sales.filter((s) => s.gradingCompany && s.grade != null).map((s) => ({ price: s.priceEur, soldAt: s.soldAt, company: s.gradingCompany!, grade: s.grade!, verified: s.verified, listingType: s.listingType, source: s.source, url: s.url })));
+  const conditions = conditionLadder(sales.filter((s) => !s.gradingCompany).map((s) => ({ price: s.priceEur, soldAt: s.soldAt, condition: s.condition, listingType: s.listingType, source: s.source, url: s.url })));
   return {
     ...base,
     hp: extra.hp, types: jsonOr(extra.types, []), dexIds: jsonOr(extra.dex_ids, []), illustrator: extra.illustrator, variants: jsonOr(row.variants, {}),
@@ -140,7 +150,8 @@ export async function getCardDetail(db: SqlDb, id: string): Promise<CardDetail |
 export async function getCardSnapshot(db: SqlDb, id: string): Promise<Snapshot | null> {
   const row = await db.first<CardForQuote>("SELECT id, set_id, cm_product_id, variants FROM cards WHERE id = ?", [id]);
   if (!row) return null;
-  return snapshotFrom(id, await cardSeries(db, row));
+  const [series, sales] = await Promise.all([cardSeries(db, row), db.all<SaleRow>("SELECT * FROM sales WHERE card_id = ? ORDER BY sold_at DESC, id DESC LIMIT 5", [id])]);
+  return snapshotFrom(id, series, sales.map((s) => ({ date: s.sold_at.slice(0, 10), value: s.price_eur, listingType: s.listing_type ?? "unknown", source: s.source, condition: s.condition, company: s.grading_company, grade: s.grade })));
 }
 
 /** Cardmarket does not expose product URLs in the public files; a search deep-link with the German language filter is the next best thing. */
@@ -148,7 +159,7 @@ export function cardmarketSearchUrl(name: string): string {
   return `https://www.cardmarket.com/de/Pokemon/Products/Search?searchString=${encodeURIComponent(name)}&language=3`;
 }
 
-interface SaleRow { id: number; card_id: string; language: string; variant: string; condition: string | null; grading_company: string | null; grade: number | null; price_eur: number; shipping_eur: number | null; sold_at: string; source: string; title: string | null; url: string | null; verified: number }
+interface SaleRow { id: number; card_id: string; language: string; variant: string; condition: string | null; grading_company: string | null; grade: number | null; price_eur: number; shipping_eur: number | null; sold_at: string; source: string; listing_type?: string | null; title: string | null; url: string | null; verified: number }
 export async function getSales(db: SqlDb, cardId: string, limit = 50): Promise<SaleRecord[]> {
   return (await db.all<SaleRow>("SELECT * FROM sales WHERE card_id = ? ORDER BY sold_at DESC LIMIT ?", [cardId, limit])).map(saleToRecord);
 }
@@ -156,7 +167,7 @@ function saleToRecord(s: SaleRow): SaleRecord {
   return {
     id: s.id, cardId: s.card_id, language: s.language as Language, variant: s.variant as Variant, condition: s.condition as SaleRecord["condition"],
     gradingCompany: s.grading_company as SaleRecord["gradingCompany"], grade: s.grade, priceEur: s.price_eur, shippingEur: s.shipping_eur, soldAt: s.sold_at,
-    source: s.source as SaleRecord["source"], title: s.title, url: s.url, verified: !!s.verified,
+    source: s.source as SaleRecord["source"], listingType: (s.listing_type ?? "unknown") as SaleRecord["listingType"], title: s.title, url: s.url, verified: !!s.verified,
   };
 }
 
@@ -202,13 +213,14 @@ export async function catalogFacets(db: SqlDb): Promise<{ rarities: Array<{ valu
 }
 
 /** Market feed: the newest sales across the catalogue with their cards; filters by grader/grade/condition/set/source. */
-export async function recentSales(db: SqlDb, opts: { grader?: string | null; grade?: number | null; condition?: string | null; setId?: string | null; source?: string | null; graded?: boolean | null; minPrice?: number | null; limit?: number; offset?: number } = {}): Promise<{ items: Array<SaleRecord & { card: CardSummary }>; total: number }> {
+export async function recentSales(db: SqlDb, opts: { grader?: string | null; grade?: number | null; condition?: string | null; setId?: string | null; source?: string | null; listingType?: string | null; graded?: boolean | null; minPrice?: number | null; limit?: number; offset?: number } = {}): Promise<{ items: Array<SaleRecord & { card: CardSummary }>; total: number }> {
   const where: string[] = [], params: (string | number)[] = [];
   if (opts.grader) { where.push("s.grading_company = ?"); params.push(opts.grader); }
   if (opts.grade != null) { where.push("s.grade = ?"); params.push(opts.grade); }
   if (opts.condition) { where.push("s.condition = ?"); params.push(opts.condition); }
   if (opts.setId) { where.push("c.set_id = ?"); params.push(opts.setId); }
   if (opts.source) { where.push("s.source = ?"); params.push(opts.source); }
+  if (opts.listingType) { where.push("s.listing_type = ?"); params.push(opts.listingType); }
   if (opts.graded === true) where.push("s.grading_company IS NOT NULL"); else if (opts.graded === false) where.push("s.grading_company IS NULL");
   if (opts.minPrice != null) { where.push("s.price_eur >= ?"); params.push(opts.minPrice); }
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";

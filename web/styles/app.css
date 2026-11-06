@@ -590,3 +590,25 @@ button.chip { cursor: pointer; } .chip.active-chip { gap: 6px; }
 .page > .seg[role="tablist"] { align-self: flex-start; }
 .rail .seg.wrap { display: grid; grid-template-columns: 1fr 1fr; }
 @media (hover: none) { .toggle-btn { display: none; } }
+
+/* ---- Comps: last sold first, with how and where it sold ---- */
+.badge.sale-auction { background: color-mix(in srgb, var(--c-violet) 18%, transparent); color: var(--c-violet); }
+.badge.sale-fixed_price { background: color-mix(in srgb, var(--c-up) 18%, transparent); color: var(--c-up); }
+.badge.sale-best_offer { background: color-mix(in srgb, var(--c-blue) 18%, transparent); color: var(--c-blue); }
+.badge.sale-unknown, .badge.sale-comp { background: var(--bg-sub); color: var(--ink-2); }
+.chip.sale-auction:not(.ghost) { background: var(--c-violet); color: #fff; } .chip.sale-fixed_price:not(.ghost) { background: var(--c-up); color: #fff; } .chip.sale-best_offer:not(.ghost) { background: var(--c-blue); color: #fff; }
+.tile-price.sold { flex-wrap: wrap; justify-content: flex-start; gap: 6px 8px; }
+.tile-price.sold small, .lrow-value.sold small { flex-basis: 100%; font-size: 11px; }
+.tile-price .basis, .lrow-value .basis { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.lrow-value.sold { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.price-main.sold { border-top-color: var(--c-up); }
+.price-main.sold.empty { border-top-color: var(--line); } .price-main.sold.empty .price-big strong { font-size: 28px; }
+.price-main .price-sub { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.comps-strip { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.comps-strip .comp b { font-variant-numeric: tabular-nums; } .comps-strip .comp small { color: var(--ink-2); }
+.price-ref { background: var(--bg-el); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 18px; display: flex; flex-direction: column; gap: 6px; }
+.price-ref .price-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; } .price-ref .price-row b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.snap-sales { display: flex; flex-direction: column; gap: 4px; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--line); }
+.snap-last { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; } .snap-last small { flex-basis: 100%; }
+.snap-value.ref { font-size: 18px; }
+.rung.none b, .rung.none small { color: var(--ink-2); }

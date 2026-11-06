@@ -19,7 +19,7 @@ export async function dashboard(): Promise<HTMLElement> {
     h("header", { class: "page-head" }, h("div", null, h("p", { class: "eyebrow" }, tr("Portfolio")), h("h1", null, `Hallo${state.user.name ? `, ${state.user.name}` : ""}`)),
       h("div", { class: "head-actions" }, hoverToggle(), h("a", { class: "btn primary", href: "/suche" }, svg(icons.plus, 18), tr(" Karte hinzufügen")))),
     h("div", { class: "stats" },
-      statCard(tr("Gesamtwert"), { n: p.totalValue, format: fmt.eurCompact }, p.change30d == null ? h("span", { class: "muted" }, tr("Wert-Historie startet heute")) : trendPill(p.change30d, " / 30 T."), "featured", tr("Summe der aktuellen Marktwerte aller Karten (Menge × Wert).")),
+      statCard(tr("Gesamtwert"), { n: p.totalValue, format: fmt.eurCompact }, h("span", null, p.change30d == null ? h("span", { class: "muted" }, tr("Wert-Historie startet heute")) : trendPill(p.change30d, " / 30 T."), p.unvaluedCount ? h("span", { class: "muted" }, ` · ${tr("{n} ohne Comp", { n: p.unvaluedCount })}`) : null), "featured", tr("Summe über alle Karten (Menge × Wert). Wert = letzter Verkauf (Comp) derselben Note bzw. desselben Zustands; rohe NM-Karten ohne Comp nach Markttrend; alles andere bleibt unbewertet.")),
       statCard(tr("Einstand"), { n: p.totalCost, format: fmt.eurCompact }, p.totalCost ? h("span", { class: `trend ${trendClass(p.totalValue - p.totalCost)}` }, `${p.totalValue - p.totalCost >= 0 ? "+" : ""}${fmt.eur(p.totalValue - p.totalCost)} (${fmt.pct(p.totalCost ? p.totalValue / p.totalCost - 1 : null)})`) : h("span", { class: "muted" }, tr("Kaufpreise erfassen für Gewinn/Verlust"))),
       statCard(tr("Karten"), { n: p.itemCount, format: (n) => fmt.int(Math.round(n)) }, h("span", { class: "muted" }, tr("{pcardCount} Positionen", { pcardCount: p.cardCount }))),
       statCard(tr("Deutsch-Anteil"), p.totalValue ? `${Math.round(((p.byLanguage.find((l) => l.language === "de")?.value ?? 0) / p.totalValue) * 100)} %` : "–", h("span", { class: "muted" }, tr("des Portfoliowerts"))),
@@ -55,7 +55,7 @@ export async function dashboard(): Promise<HTMLElement> {
     h("div", { class: "holding-value" }, h("b", null, fmt.eur(v)), trendPill(it.quote?.trend30))); })));
   root.append(h("div", { class: "grid-2" }, top, breakdown));
 
-  if (p.movers.length) root.append(section(tr("Bewegung in deiner Sammlung (30 Tage)"), h("div", { class: "tiles" }, ...p.movers.map((m) => cardTile(m.item.card, { value: m.item.currentValue, trend: m.change30, sub: `${label.language(m.item.language)} · ${label.condition(m.item.condition)}` })))));
+  if (p.movers.length) root.append(section(tr("Bewegung in deiner Sammlung (30 Tage)"), h("div", { class: "tiles" }, ...p.movers.map((m) => cardTile(m.item.card, { value: m.item.currentValue, trend: m.change30, sale: false, sub: `${label.language(m.item.language)} · ${label.condition(m.item.condition)}` })))));
   root.append(moversPanel(movers));
   return root;
 }
@@ -87,8 +87,8 @@ function valuePanel(p: PortfolioSummary): HTMLElement {
 export function moversPanel(m: { up: Array<{ card: Parameters<typeof cardTile>[0]; value: number; trend: number }>; down: Array<{ card: Parameters<typeof cardTile>[0]; value: number; trend: number }> }): HTMLElement {
   return section(tr("Markt: Deutsche Karten in Bewegung"),
     h("div", { class: "grid-2" },
-      h("div", null, h("h3", { class: "sub up" }, svg(icons.up, 16), tr(" Aufsteiger")), h("div", { class: "tiles small" }, ...m.up.slice(0, 6).map((x) => cardTile(x.card, { value: x.value, trend: x.trend })))),
-      h("div", null, h("h3", { class: "sub down" }, svg(icons.down, 16), tr(" Absteiger")), h("div", { class: "tiles small" }, ...m.down.slice(0, 6).map((x) => cardTile(x.card, { value: x.value, trend: x.trend })))),
+      h("div", null, h("h3", { class: "sub up" }, svg(icons.up, 16), tr(" Aufsteiger")), h("div", { class: "tiles small" }, ...m.up.slice(0, 6).map((x) => cardTile(x.card, { value: x.value, trend: x.trend, sale: false })))),
+      h("div", null, h("h3", { class: "sub down" }, svg(icons.down, 16), tr(" Absteiger")), h("div", { class: "tiles small" }, ...m.down.slice(0, 6).map((x) => cardTile(x.card, { value: x.value, trend: x.trend, sale: false })))),
     ),
     h("a", { class: "link", href: "/markt" }, tr("Zum Marktüberblick →")));
 }

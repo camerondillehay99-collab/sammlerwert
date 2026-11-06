@@ -77,6 +77,16 @@ export interface EbayItemSummary {
 export interface EbayItemSale {
   itemId: string; title: string; itemWebUrl?: string; condition?: string;
   lastSoldPrice?: { value: string; currency: string }; lastSoldDate?: string; totalSoldQuantity?: number;
+  buyingOptions?: string[];
+}
+
+/** eBay's buyingOptions (FIXED_PRICE | AUCTION | BEST_OFFER, possibly several) → how the sale is shown as a comp. */
+export function listingTypeOf(options: string[] | undefined): "fixed_price" | "auction" | "best_offer" | "unknown" {
+  if (!options?.length) return "unknown";
+  if (options.includes("AUCTION")) return "auction";
+  if (options.includes("BEST_OFFER")) return "best_offer";
+  if (options.includes("FIXED_PRICE")) return "fixed_price";
+  return "unknown";
 }
 
 export function buildQuery(card: { nameDe: string | null; nameEn: string | null; localId: string }): string {
@@ -180,8 +190,8 @@ export async function runEbayIngest(db: SqlDb, cardIds?: string[], log: (m: stri
             if (!f.matchesCard || f.isLot || f.isJunk || !f.language || f.languageConfidence < 0.75) { stats.skipped++; continue; }
             const price = Number(it.lastSoldPrice?.value);
             if (!Number.isFinite(price) || it.lastSoldPrice?.currency !== "EUR" || !it.lastSoldDate) continue;
-            writes.push(stmt(`INSERT OR IGNORE INTO sales(card_id, language, variant, condition, grading_company, grade, price_eur, shipping_eur, sold_at, source, source_ref, title, url, verified)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ebay_de', ?, ?, ?, 1)`, c.id, f.language, f.variant, mapCondition(it.condition), f.gradingCompany, f.grade, price, null, it.lastSoldDate, `${it.itemId}:${it.lastSoldDate}`, it.title, it.itemWebUrl ?? null));
+            writes.push(stmt(`INSERT OR IGNORE INTO sales(card_id, language, variant, condition, grading_company, grade, price_eur, shipping_eur, sold_at, source, source_ref, listing_type, title, url, verified)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ebay_de', ?, ?, ?, ?, 1)`, c.id, f.language, f.variant, mapCondition(it.condition), f.gradingCompany, f.grade, price, null, it.lastSoldDate, `${it.itemId}:${it.lastSoldDate}`, listingTypeOf(it.buyingOptions), it.title, it.itemWebUrl ?? null));
             nS++;
           }
         } catch (e) {

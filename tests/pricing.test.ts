@@ -107,26 +107,25 @@ describe("learnFactor", () => {
 
 describe("gradedValues", () => {
   const now = "2026-11-04T00:00:00Z";
-  const sale = (price: number, daysAgo: number, company = "PSA", grade = 10, verified = true) =>
-    ({ price, soldAt: new Date(Date.parse(now) - daysAgo * 86_400_000).toISOString(), company, grade, verified });
-  test("values a grade from its own sales, trims outliers, estimates missing PSA grades", () => {
-    const sales = [sale(300, 2), sale(320, 10), sale(290, 20), sale(3000, 5), sale(150, 3, "PSA", 9), sale(160, 30, "PSA", 9), sale(500, 1, "BGS", 9.5)];
-    const out = gradedValues(sales, 100, now);
+  const sale = (price: number, daysAgo: number, company = "PSA", grade = 10, verified = true, listingType: string | null = "auction") =>
+    ({ price, soldAt: new Date(Date.parse(now) - daysAgo * 86_400_000).toISOString(), company, grade, verified, listingType, source: "ebay_de" });
+  test("comps per grade: last sold price plus a trimmed median, never an estimate", () => {
+    const sales = [sale(300, 2), sale(320, 10), sale(290, 20), sale(3000, 5), sale(150, 3, "PSA", 9, true, "fixed_price"), sale(160, 30, "PSA", 9), sale(500, 1, "BGS", 9.5)];
+    const out = gradedValues(sales, now);
     const psa10 = out.find((g) => g.company === "PSA" && g.grade === 10)!;
     expect(psa10.method).toBe("sales"); expect(psa10.n).toBe(4);
-    expect(psa10.value).toBeGreaterThan(280); expect(psa10.value).toBeLessThan(330); // the 3000 € outlier is trimmed
+    expect(psa10.value).toBe(300); expect(psa10.lastListingType).toBe("auction"); // the newest sale is the quoted comp
+    expect(psa10.median!).toBeGreaterThan(280); expect(psa10.median!).toBeLessThan(330); // the 3000 € outlier is trimmed from the median
     const psa9 = out.find((g) => g.company === "PSA" && g.grade === 9)!;
-    expect(psa9.method).toBe("sales"); expect(psa9.n).toBe(2);
-    expect(out.find((g) => g.company === "BGS" && g.method === "sales")).toBeUndefined(); // a single sale is not a value
+    expect(psa9.value).toBe(150); expect(psa9.lastListingType).toBe("fixed_price"); expect(psa9.n).toBe(2);
+    const bgs = out.find((g) => g.company === "BGS")!;
+    expect(bgs.value).toBe(500); expect(bgs.median).toBeNull(); // one sale: shown as last sold, no median
     expect(out[0]!.company).toBe("PSA"); expect(out[0]!.grade).toBe(10); // sorted PSA first, highest grade first
+    expect(out.every((g) => g.method === "sales")).toBe(true);
   });
-  test("multiplier estimates only when no sales exist and the raw value is meaningful", () => {
-    const est = gradedValues([], 40, now);
-    expect(est.every((g) => g.method === "multiplier")).toBe(true);
-    expect(est.slice(0, 3).map((g) => `${g.company} ${g.grade}`)).toEqual(["PSA 10", "PSA 9", "PSA 8"]);
-    expect(new Set(est.map((g) => g.company))).toEqual(new Set(["PSA", "BGS", "CGC", "TAG"]));
-    expect(est[0]!.value).toBeCloseTo(120, 5);
-    expect(gradedValues([], 1, now)).toEqual([]);
-    expect(gradedValues([sale(50, 400), sale(55, 390)], null, now)).toEqual([]); // too old
+  test("no sales → no comps (nothing is estimated from the raw value)", () => {
+    expect(gradedValues([], now)).toEqual([]);
+    const old = gradedValues([sale(50, 400)], now);
+    expect(old.length).toBe(1); expect(old[0]!.value).toBe(50); expect(old[0]!.n).toBe(0); // old sale still shown as last sold, but not in the 180-day stats
   });
 });

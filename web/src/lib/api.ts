@@ -78,7 +78,7 @@ export const api = {
   },
   facets: () => cached<CatalogFacets>("/api/catalog/facets", 3_600_000),
   snapshot: (id: string) => cached<unknown>(`/api/cards/${encodeURIComponent(id)}/snapshot`, 300_000),
-  salesFeed: (opts: { grader?: string | null; grade?: string | null; condition?: string | null; set?: string | null; graded?: "1" | "0" | null; min?: string | null; limit?: number; offset?: number } = {}) => {
+  salesFeed: (opts: { grader?: string | null; grade?: string | null; condition?: string | null; set?: string | null; graded?: "1" | "0" | null; min?: string | null; type?: string | null; source?: string | null; limit?: number; offset?: number } = {}) => {
     const p = new URLSearchParams();
     for (const [k, v] of Object.entries(opts)) if (v != null && v !== "") p.set(k, String(v));
     return cached<{ items: SaleFeedItem[]; total: number }>(`/api/market/sales?${p}`, 60_000);

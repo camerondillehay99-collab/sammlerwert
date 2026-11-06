@@ -1,6 +1,6 @@
 import { CONDITION_LABELS } from "../../../shared/types.ts";
 import type { CardDetail, CardSummary, Collection, CollectionItem, PriceQuote } from "../../../shared/types.ts";
-import { h, svg, icons, fmt, label, cardImage, cardName, trendClass, toast, imgOr } from "../lib/dom.ts";
+import { h, svg, icons, fmt, label, cardImage, cardName, trendClass, toast, imgOr, saleBadge } from "../lib/dom.ts";
 import { api, HttpError, invalidate } from "../lib/api.ts";
 import { state } from "../lib/store.ts";
 import { navigate } from "../lib/router.ts";
@@ -8,18 +8,23 @@ import { tilt, tip, countUp } from "../lib/fx.ts";
 import { tr } from "../lib/i18n.ts";
 import { attachSnapshot } from "./hover.ts";
 
-export function cardTile(card: CardSummary, opts: { value?: number | null; sub?: string; trend?: number | null; onClick?: () => void; snapshot?: boolean } = {}): HTMLElement {
+export function cardTile(card: CardSummary, opts: { value?: number | null; sub?: string; trend?: number | null; onClick?: () => void; snapshot?: boolean; /** show the card's last real sale instead of a market value (default) */ sale?: boolean } = {}): HTMLElement {
   const img = cardImage(card);
   const value = opts.value !== undefined ? opts.value : card.valueDe;
   const trend = opts.trend !== undefined ? opts.trend : card.trend30;
   const trendEl = trend != null ? tip(h("span", { class: `trend ${trendClass(trend)}` }, fmt.pct(trend)), tr("Veränderung des Marktwerts in den letzten 30 Tagen")) : null;
+  // Price line: the last real sale first (with how it sold), else the market trend – clearly labelled, never an estimate.
+  const sale = opts.sale === false ? null : card.lastSale;
+  const priceLine = sale
+    ? h("div", { class: "tile-price sold" }, h("b", null, fmt.eur(sale.priceEur)), saleBadge(sale.listingType), h("small", { class: "muted" }, `${sale.gradingCompany ? `${sale.gradingCompany} ${sale.grade}` : sale.condition ? label.condition(sale.condition) : ""} · ${fmt.date(sale.soldAt)}`.replace(/^ · /, "")))
+    : h("div", { class: "tile-price" }, h("b", null, fmt.eur(value)), value != null && opts.sale !== false ? h("small", { class: "muted basis" }, tr("Trend")) : null, trendEl);
   const el = h("a", { class: "tile", href: `/karte/${encodeURIComponent(card.id)}`, onClick: opts.onClick ? (e: Event) => { e.preventDefault(); opts.onClick!(); } : null },
     h("div", { class: "tile-img" }, imgOr(img, () => placeholder(card), { alt: cardName(card), width: 245, height: 342 }), h("i", { class: "gloss" }),
       h("div", { class: "tile-hover" }, confidenceBadge(card.confidenceDe), card.rarity ? h("span", { class: "badge" }, card.rarity) : null)),
     h("div", { class: "tile-body" },
       h("div", { class: "tile-title" }, h("strong", null, cardName(card)), h("span", { class: "num" }, `#${card.localId}`)),
       h("div", { class: "tile-sub" }, opts.sub ?? card.setNameDe ?? card.setNameEn ?? ""),
-      h("div", { class: "tile-price" }, h("b", null, fmt.eur(value)), trendEl),
+      priceLine,
     ),
   );
   tilt(el);
@@ -92,6 +97,8 @@ export const CONDITION_OPTIONS: Array<[string, string]> = Object.entries(CONDITI
 export const LANG_OPTIONS: Array<[string, string]> = [["de", "Deutsch"], ["en", "Englisch"], ["jp", "Japanisch"], ["fr", "Französisch"], ["it", "Italienisch"], ["es", "Spanisch"], ["other", "Andere"]];
 export const COND_OPTIONS: Array<[string, string]> = [["NM", "Near Mint"], ["MT", "Mint"], ["EX", "Excellent"], ["GD", "Good"], ["LP", "Light Played"], ["PL", "Played"], ["PO", "Poor"]];
 export const GRADER_OPTIONS: Array<[string, string]> = [["", "Ungraded"], ["PSA", "PSA"], ["BGS", "BGS"], ["CGC", "CGC"], ["GSG", "GSG"], ["AP", "AP"], ["TAG", "TAG"], ["ACE", "ACE"], ["OTHER", "Andere"]];
+export const MARKETPLACE_OPTIONS: Array<[string, string]> = [["ebay", "eBay"], ["cardmarket", "Cardmarket"], ["fanatics", "Fanatics Collect"], ["heritage", "Heritage Auctions"], ["alt", "Alt"], ["user", "Privat / sonstige"]];
+export const SALE_TYPE_OPTIONS: Array<[string, string]> = [["fixed_price", "Sofortkauf"], ["auction", "Auktion"], ["best_offer", "Preisvorschlag angenommen"], ["unknown", "Unbekannt"]];
 export function variantOptions(variants: Record<string, boolean>): Array<[string, string]> {
   const out: Array<[string, string]> = [];
   if (variants.normal !== false) out.push(["normal", tr("Normal")]);
@@ -217,19 +224,22 @@ export function reportSale(card: CardDetail, onDone: (c: CardDetail) => void): v
   const price = h("input", { name: "priceEur", type: "number", step: "0.01", min: "0.01", required: true, inputmode: "decimal", placeholder: "z. B. 42,50" });
   const date = h("input", { name: "soldAt", type: "date", value: new Date().toISOString().slice(0, 10), required: true });
   const url = h("input", { name: "url", type: "url", placeholder: tr("Link zum Angebot (optional)") });
+  const marketplace = select("marketplace", MARKETPLACE_OPTIONS, "ebay");
+  const saleType = select("listingType", SALE_TYPE_OPTIONS, "fixed_price");
   const submit = h("button", { class: "btn primary", type: "submit" }, tr("Verkauf melden"));
   form.append(
-    h("p", { class: "muted" }, tr("Gemeldete Verkäufe fließen mit geringerem Gewicht in den Marktwert ein und werden auf Plausibilität geprüft. Danke, dass du die deutsche Datenbasis besser machst!")),
+    h("p", { class: "muted" }, tr("Gemeldete Verkäufe erscheinen als Comp unter der Karte (als „Community“ markiert) und werden auf Plausibilität geprüft. Danke, dass du die deutsche Datenbasis besser machst!")),
     h("div", { class: "row" }, field(tr("Verkaufspreis (ohne Versand)"), price), field(tr("Verkauft am"), date)),
+    h("div", { class: "row" }, field(tr("Marktplatz"), marketplace), field(tr("Verkaufsart"), saleType)),
     h("div", { class: "row" }, field(tr("Sprache"), lang), field(tr("Variante"), variant)),
     h("div", { class: "row" }, field(tr("Zustand"), cond), field(tr("Grading"), grader)),
-    h("div", { class: "row" }, field(tr("Note (falls graded)"), grade), field(tr("Quelle"), url)),
+    h("div", { class: "row" }, field(tr("Note (falls graded)"), grade), field(tr("Link"), url)),
     h("div", { class: "actions" }, submit),
   );
   form.addEventListener("submit", async (e) => {
     e.preventDefault(); submit.disabled = true;
     try {
-      const updated = await api.reportSale(card.id, { priceEur: Number(price.value), soldAt: date.value, language: lang.value, variant: variant.value, condition: cond.value, gradingCompany: grader.value || null, grade: grader.value ? Number(grade.value) || null : null, url: url.value || null });
+      const updated = await api.reportSale(card.id, { priceEur: Number(price.value), soldAt: date.value, language: lang.value, variant: variant.value, condition: cond.value, gradingCompany: grader.value || null, grade: grader.value ? Number(grade.value) || null : null, url: url.value || null, marketplace: marketplace.value, listingType: saleType.value });
       invalidate("/api/cards"); close(); toast("Danke! Verkauf gespeichert."); onDone(updated);
     } catch (err) { submit.disabled = false; toast((err as Error).message, "error"); }
   });

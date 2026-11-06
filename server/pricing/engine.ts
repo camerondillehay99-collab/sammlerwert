@@ -13,7 +13,7 @@
  */
 import type { SqlDb, SqlValue } from "../db/adapter.ts";
 import { bulkInsert, runBatches } from "../db/adapter.ts";
-import type { Language, PriceQuote, Variant } from "../../shared/types.ts";
+import type { Language, PriceQuote, SaleSource, Variant } from "../../shared/types.ts";
 import { nowIso, today } from "../db/index.ts";
 import { round2, sumWeights, trimOutliers, weightedQuantile, weightedMedian, type WPoint } from "./stats.ts";
 
@@ -149,98 +149,79 @@ export function computeQuote(input: QuoteInput): PriceQuote {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Graded cards (PSA / BGS / CGC …): valued from their own sales, grade by grade – the same way the
-// US tools do it – and only estimated from the raw value (multiplier) when no graded sale exists.
+// Comps: condition rungs and graded grades are priced from real sales only (last sold + median).
 // ---------------------------------------------------------------------------------------------
-export const GRADE_MULT: Record<string, Record<string, number>> = {
-  PSA: { "10": 3.0, "9": 1.5, "8": 1.1, "7": 0.95 },
-  BGS: { "10": 4.5, "9.5": 2.6, "9": 1.4, "8.5": 1.05 },
-  CGC: { "10": 2.8, "9.5": 1.7, "9": 1.3 },
-  TAG: { "10": 3.2, "9.5": 2.0, "9": 1.4 },
-  default: { "10": 2.5, "9.5": 1.6, "9": 1.3, "8": 1.05 },
-};
-/** Grades shown as estimates (clearly labelled) until real graded sales exist – the companies collectors actually compare. */
-export const ESTIMATED_GRADES: Array<[company: string, grade: number]> = [["PSA", 10], ["PSA", 9], ["PSA", 8], ["BGS", 10], ["BGS", 9.5], ["BGS", 9], ["CGC", 10], ["CGC", 9.5], ["CGC", 9], ["TAG", 10], ["TAG", 9]];
-
 /**
  * Condition ladder on the US scale (what TCGplayer/eBay buyers use) with the Cardmarket equivalents.
- * Multipliers are relative to Near Mint and get replaced by real sales medians per bucket when ≥ 2 exist.
+ * Comps only: each rung shows the LAST SOLD price of a real sale in that bucket (plus a time-weighted median when ≥ 2
+ * sales exist in 180 days). Rungs without a sale stay empty – no multiplier estimates, that is not how the trade prices.
  */
-export const CONDITION_LADDER: Array<{ code: "NM" | "LP" | "MP" | "HP" | "DMG"; cardmarket: Array<"MT" | "NM" | "EX" | "GD" | "LP" | "PL" | "PO">; label: string; multiplier: number }> = [
-  { code: "NM", cardmarket: ["MT", "NM"], label: "Near Mint", multiplier: 1 },
-  { code: "LP", cardmarket: ["EX", "GD"], label: "Lightly Played", multiplier: 0.78 },
-  { code: "MP", cardmarket: ["LP"], label: "Moderately Played", multiplier: 0.6 },
-  { code: "HP", cardmarket: ["PL"], label: "Heavily Played", multiplier: 0.45 },
-  { code: "DMG", cardmarket: ["PO"], label: "Damaged", multiplier: 0.3 },
+export const CONDITION_LADDER: Array<{ code: "NM" | "LP" | "MP" | "HP" | "DMG"; cardmarket: Array<"MT" | "NM" | "EX" | "GD" | "LP" | "PL" | "PO">; label: string }> = [
+  { code: "NM", cardmarket: ["MT", "NM"], label: "Near Mint" },
+  { code: "LP", cardmarket: ["EX", "GD"], label: "Lightly Played" },
+  { code: "MP", cardmarket: ["LP"], label: "Moderately Played" },
+  { code: "HP", cardmarket: ["PL"], label: "Heavily Played" },
+  { code: "DMG", cardmarket: ["PO"], label: "Damaged" },
 ];
 
-export interface ConditionSaleInput { price: number; soldAt: string; condition: string | null }
-export function conditionLadder(sales: ConditionSaleInput[], nmValue: number | null, now = nowIso()) {
+export interface CompSaleInput { price: number; soldAt: string; condition: string | null; listingType?: string | null; source?: string | null; url?: string | null }
+const LISTING_TYPES = new Set(["fixed_price", "auction", "best_offer"]);
+const listingTypeOf = (t: string | null | undefined) => (t && LISTING_TYPES.has(t) ? t : "unknown") as "fixed_price" | "auction" | "best_offer" | "unknown";
+
+export function conditionLadder(sales: CompSaleInput[], now = nowIso()) {
   const nowMs = new Date(now).getTime();
   const age = (iso: string) => (nowMs - new Date(iso).getTime()) / 86_400_000;
   return CONDITION_LADDER.map((step) => {
-    const bucket = sales.filter((s) => s.price > 0 && s.condition && (step.cardmarket as string[]).includes(s.condition) && age(s.soldAt) <= 180);
-    if (bucket.length >= 2) {
-      const pts: WPoint[] = bucket.map((s) => ({ v: s.price, w: Math.pow(0.5, age(s.soldAt) / 45) }));
-      const v = weightedMedian(trimOutliers(pts));
-      if (v != null) return { ...step, value: round2(v), n: bucket.length, method: "sales" as const };
-    }
-    return { ...step, value: nmValue != null ? round2(nmValue * step.multiplier) : null, n: bucket.length, method: "estimate" as const };
+    const bucket = sales.filter((s) => s.price > 0 && s.condition && (step.cardmarket as string[]).includes(s.condition)).sort((a, b) => b.soldAt.localeCompare(a.soldAt));
+    const last = bucket[0];
+    const recent = bucket.filter((s) => age(s.soldAt) <= 180);
+    let median: number | null = null;
+    if (recent.length >= 2) median = round2(weightedMedian(trimOutliers(recent.map((s) => ({ v: s.price, w: Math.pow(0.5, age(s.soldAt) / 45) })))));
+    if (!last) return { ...step, value: null, median: null, n: 0, lastSoldAt: null, lastListingType: null, lastSource: null, lastUrl: null, method: "none" as const };
+    return { ...step, value: round2(last.price), median, n: recent.length, lastSoldAt: last.soldAt, lastListingType: listingTypeOf(last.listingType), lastSource: (last.source ?? "user") as SaleSource, lastUrl: last.url ?? null, method: "sales" as const };
   });
 }
 const GRADED_HALF_LIFE_DAYS = 45; // graded cards trade less often; decay slower than raw
 
-export interface GradedSaleInput { price: number; soldAt: string; company: string; grade: number; verified: boolean }
-export interface GradedValue {
-  company: string; grade: number; value: number; low: number | null; high: number | null;
-  n: number; n90: number; lastSoldAt: string | null; method: "sales" | "multiplier";
-}
-
-export function gradeMultiplier(company: string, grade: number): number {
-  const table = GRADE_MULT[company] ?? GRADE_MULT.default!;
-  return table[String(grade)] ?? GRADE_MULT.default![String(grade)] ?? 1;
-}
+export interface GradedSaleInput { price: number; soldAt: string; company: string; grade: number; verified: boolean; listingType?: string | null; source?: string | null; url?: string | null }
+export type GradedValue = import("../../shared/types.ts").GradedValue;
 
 /**
- * One value per (company, grade) that has ≥ 2 sales in the last 180 days: time-decayed weighted median after
- * outlier trimming, with the inter-quartile range as spread. Grades without sales get a multiplier estimate
- * from the raw NM value (PSA 10 / PSA 9 only, so the list stays honest and short).
+ * One comp per (company, grade) that has at least one real sale: the last sold price, the date and how it sold,
+ * plus a time-decayed weighted median (outliers trimmed, IQR as spread) once ≥ 2 sales exist in 180 days.
+ * Nothing is estimated – a grade without a recorded sale is simply absent.
  */
-export function gradedValues(sales: GradedSaleInput[], rawValue: number | null, now = nowIso()): GradedValue[] {
+export function gradedValues(sales: GradedSaleInput[], now = nowIso()): GradedValue[] {
   const nowMs = new Date(now).getTime();
   const age = (iso: string) => (nowMs - new Date(iso).getTime()) / 86_400_000;
   const groups = new Map<string, GradedSaleInput[]>();
   for (const s of sales) {
-    if (!(s.price > 0) || !s.company || !(s.grade > 0) || age(s.soldAt) > 180) continue;
+    if (!(s.price > 0) || !s.company || !(s.grade > 0)) continue;
     const k = `${s.company}|${s.grade}`;
     (groups.get(k) ?? groups.set(k, []).get(k)!).push(s);
   }
   const out: GradedValue[] = [];
   for (const [k, g] of groups) {
-    if (g.length < 2) continue;
-    const pts: WPoint[] = g.map((s) => ({ v: s.price, w: Math.pow(0.5, age(s.soldAt) / GRADED_HALF_LIFE_DAYS) * (s.verified ? 1 : 0.5) }));
-    const trimmed = trimOutliers(pts);
-    const value = weightedMedian(trimmed);
-    if (value == null) continue;
+    g.sort((a, b) => b.soldAt.localeCompare(a.soldAt));
+    const last = g[0]!;
+    const recent = g.filter((s) => age(s.soldAt) <= 180);
+    let median: number | null = null, low: number | null = null, high: number | null = null;
+    if (recent.length >= 2) {
+      const trimmed = trimOutliers(recent.map((s) => ({ v: s.price, w: Math.pow(0.5, age(s.soldAt) / GRADED_HALF_LIFE_DAYS) * (s.verified ? 1 : 0.5) })));
+      median = round2(weightedMedian(trimmed));
+      if (trimmed.length >= 3) { low = round2(weightedQuantile(trimmed, 0.25)); high = round2(weightedQuantile(trimmed, 0.75)); }
+    }
     const [company, grade] = k.split("|") as [string, string];
     out.push({
-      company, grade: Number(grade), value: round2(value)!,
-      low: trimmed.length >= 3 ? round2(weightedQuantile(trimmed, 0.25)) : null, high: trimmed.length >= 3 ? round2(weightedQuantile(trimmed, 0.75)) : null,
-      n: g.length, n90: g.filter((s) => age(s.soldAt) <= 90).length,
-      lastSoldAt: g.map((s) => s.soldAt).sort().at(-1) ?? null, method: "sales",
+      company, grade: Number(grade), value: round2(last.price)!, median, low, high,
+      n: recent.length, n90: recent.filter((s) => age(s.soldAt) <= 90).length,
+      lastSoldAt: last.soldAt, lastListingType: listingTypeOf(last.listingType), lastSource: (last.source ?? "user") as SaleSource, lastUrl: last.url ?? null, method: "sales",
     });
-  }
-  if (rawValue != null && rawValue >= 2) {
-    for (const [company, grade] of ESTIMATED_GRADES) {
-      if (out.some((v) => v.company === company && v.grade === grade)) continue;
-      out.push({ company, grade, value: round2(rawValue * gradeMultiplier(company, grade))!, low: null, high: null, n: 0, n90: 0, lastSoldAt: null, method: "multiplier" });
-    }
   }
   const rank: Record<string, number> = { PSA: 0, BGS: 1, CGC: 2, TAG: 3 };
   return out.sort((a, b) => (rank[a.company] ?? 9) - (rank[b.company] ?? 9) || b.grade - a.grade);
 }
 
-/** Learn language factor = median(sale_NM / guide_anchor), shrunk toward `global`. */
 export function learnFactor(ratios: number[], global: number): { value: number; n: number } {
   const clean = ratios.filter((r) => Number.isFinite(r) && r > 0.1 && r < 10);
   if (!clean.length) return { value: global, n: 0 };

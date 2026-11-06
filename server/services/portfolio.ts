@@ -1,20 +1,41 @@
 import type { SqlDb } from "../db/adapter.ts";
 import { bulkInsert, runBatches } from "../db/adapter.ts";
 import type { Collection, CollectionItem, Condition, GradingCompany, Insight, Language, PortfolioSummary, PriceQuote, Variant } from "../../shared/types.ts";
-import { CONDITION_MULT, GRADE_MULT, gradeMultiplier } from "../pricing/engine.ts";
+import { CONDITION_LADDER } from "../pricing/engine.ts";
 import { getCardSummariesWithQuotes } from "./catalog.ts";
+import { chunks, placeholders } from "../db/adapter.ts";
 import { today } from "../db/index.ts";
 
 interface ItemRow { id: number; collection_id: number; card_id: string; language: string; variant: string; condition: string; grading_company: string | null; grade: number | null; cert_no: string | null; quantity: number; purchase_price_eur: number | null; purchased_at: string | null; notes: string | null; image_path: string | null; created_at: string; source?: string | null }
 
-export { GRADE_MULT };
+/** A recorded sale that can serve as a comp for a held card. */
+export interface CompRow { card_id: string; condition: string | null; grading_company: string | null; grade: number | null; price_eur: number; sold_at: string }
 
-export function unitValue(q: PriceQuote | null, item: { condition: string; gradingCompany: string | null; grade: number | null }): number | null {
-  if (!q?.value) return null;
-  if (item.gradingCompany && item.grade != null) {
-    return Math.round(q.value * gradeMultiplier(item.gradingCompany, item.grade) * 100) / 100;
+/**
+ * What a held card is worth – the way the trade prices it: the LAST SOLD comp of the same grade (graded cards) or the
+ * same condition bucket (raw cards) within 180 days. Without a comp, only a raw card in NM/MT falls back to the market
+ * price (Cardmarket trend × language factor); every other case stays unvalued rather than estimated.
+ */
+export function unitValue(q: PriceQuote | null, item: { condition: string; gradingCompany: string | null; grade: number | null }, comps: CompRow[] = []): { value: number | null; basis: "comp" | "market" | null } {
+  const graded = !!item.gradingCompany && item.grade != null;
+  const bucket = CONDITION_LADDER.find((c) => (c.cardmarket as string[]).includes(item.condition))?.cardmarket as string[] | undefined;
+  const comp = comps.find((c) => graded
+    ? c.grading_company === item.gradingCompany && c.grade === item.grade
+    : !c.grading_company && !!c.condition && (bucket ?? ["NM", "MT"]).includes(c.condition));
+  if (comp) return { value: Math.round(comp.price_eur * 100) / 100, basis: "comp" };
+  if (!graded && (item.condition === "NM" || item.condition === "MT") && q?.value) return { value: Math.round(q.value * 100) / 100, basis: "market" };
+  return { value: null, basis: null };
+}
+
+/** Newest-first sales of the last 180 days for a set of cards, as comp candidates. */
+export async function compsFor(db: SqlDb, cardIds: string[]): Promise<Map<string, CompRow[]>> {
+  const out = new Map<string, CompRow[]>();
+  const since = new Date(Date.now() - 180 * 86_400_000).toISOString().slice(0, 10);
+  for (const chunk of chunks([...new Set(cardIds)], 90)) {
+    const rows = await db.all<CompRow>(`SELECT card_id, condition, grading_company, grade, price_eur, sold_at FROM sales WHERE card_id IN (${placeholders(chunk.length)}) AND sold_at >= ? AND price_eur > 0 ORDER BY sold_at DESC, id DESC`, [...chunk, since]);
+    for (const r of rows) (out.get(r.card_id) ?? out.set(r.card_id, []).get(r.card_id)!).push(r);
   }
-  return Math.round(q.value * (CONDITION_MULT[item.condition] ?? 0.95) * 100) / 100;
+  return out;
 }
 
 export async function defaultCollectionId(db: SqlDb, userId: number): Promise<number> {
@@ -48,28 +69,30 @@ export async function listItems(db: SqlDb, userId: number, collectionId?: number
 }
 
 export async function hydrate(db: SqlDb, rows: ItemRow[]): Promise<CollectionItem[]> {
-  const { cards, quotes } = await getCardSummariesWithQuotes(db, rows.map((r) => r.card_id));
+  const [{ cards, quotes }, comps] = await Promise.all([getCardSummariesWithQuotes(db, rows.map((r) => r.card_id)), compsFor(db, rows.map((r) => r.card_id))]);
   return rows.map((r) => {
     const card = cards.get(r.card_id)!;
     // Fallback chain: exact language/variant → same language normal → English normal
     const quote = quotes.get(`${r.card_id}|${r.language}|${r.variant}`) ?? quotes.get(`${r.card_id}|${r.language}|*`) ?? quotes.get(`${r.card_id}|en|${r.variant}`) ?? quotes.get(`${r.card_id}|en|*`) ?? null;
     const base = { condition: r.condition, gradingCompany: r.grading_company, grade: r.grade };
+    const uv = unitValue(quote, base, comps.get(r.card_id) ?? []);
     return {
       id: r.id, collectionId: r.collection_id, cardId: r.card_id, language: r.language as Language, variant: r.variant as Variant, condition: r.condition as Condition,
       gradingCompany: r.grading_company as GradingCompany | null, grade: r.grade, certNo: r.cert_no, quantity: r.quantity, purchasePriceEur: r.purchase_price_eur,
-      purchasedAt: r.purchased_at, notes: r.notes, imagePath: r.image_path, createdAt: r.created_at, source: r.source ?? null, card, quote, currentValue: unitValue(quote, base),
+      purchasedAt: r.purchased_at, notes: r.notes, imagePath: r.image_path, createdAt: r.created_at, source: r.source ?? null, card, quote, currentValue: uv.value, valueBasis: uv.basis,
     };
   });
 }
 
 export async function summary(db: SqlDb, userId: number): Promise<PortfolioSummary> {
   const items = await listItems(db, userId);
-  let totalValue = 0, totalCost = 0, itemCount = 0;
+  let totalValue = 0, totalCost = 0, itemCount = 0, unvaluedCount = 0;
   const byLang = new Map<string, { value: number; count: number }>();
   const bySet = new Map<string, { name: string; value: number; count: number }>();
   const byKind = new Map<string, { value: number; count: number }>();
   for (const it of items) {
     const v = (it.currentValue ?? 0) * it.quantity;
+    if (it.currentValue == null) unvaluedCount += it.quantity;
     totalValue += v; totalCost += (it.purchasePriceEur ?? 0) * it.quantity; itemCount += it.quantity;
     const kind = it.gradingCompany ?? "raw";
     const k = byKind.get(kind) ?? { value: 0, count: 0 }; k.value += v; k.count += it.quantity; byKind.set(kind, k);
@@ -95,7 +118,7 @@ export async function summary(db: SqlDb, userId: number): Promise<PortfolioSumma
   const movers = items.filter((i) => i.quote?.trend30 != null && (i.currentValue ?? 0) >= 2)
     .map((item) => ({ item, change30: item.quote!.trend30! })).sort((a, b) => Math.abs(b.change30) - Math.abs(a.change30)).slice(0, 8);
   return {
-    totalValue: r2(totalValue), totalCost: r2(totalCost), itemCount, cardCount: items.length,
+    totalValue: r2(totalValue), totalCost: r2(totalCost), itemCount, cardCount: items.length, unvaluedCount,
     change24h: rel(at(1)), change7d: rel(at(7)), change30d: rel(at(30)),
     byLanguage: [...byLang].map(([language, v]) => ({ language: language as Language, value: r2(v.value), count: v.count })).sort((a, b) => b.value - a.value),
     bySet: [...bySet].map(([setId, v]) => ({ setId, setName: v.name, value: r2(v.value), count: v.count })).sort((a, b) => b.value - a.value).slice(0, 10),

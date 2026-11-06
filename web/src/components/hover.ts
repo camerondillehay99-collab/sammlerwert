@@ -4,7 +4,7 @@
  * with their source, and a link to the full history. Phones get the same card as a bottom sheet from the ⓘ chip.
  * Snapshots come from /api/cards/:id/snapshot (edge-cached, ≤ 60 points) and are memoised per session.
  */
-import { h, svg, icons, fmt, cardName } from "../lib/dom.ts";
+import { h, svg, icons, fmt, cardName, label, saleBadge } from "../lib/dom.ts";
 import { sparkline } from "../lib/chart.ts";
 import { fine } from "../lib/fx.ts";
 import { safeGet, safeSet } from "../lib/store.ts";
@@ -16,6 +16,7 @@ export interface Snapshot {
   value: number | null; prev: number | null; change: number | null; change30: number | null; change1y: number | null;
   low1y: number | null; high1y: number | null; n: number; first: string | null; last: string | null;
   spark: Array<[string, number]>; recent: Array<{ date: string; value: number; source: string }>;
+  sales: Array<{ date: string; value: number; listingType: string; source: string; condition: string | null; company: string | null; grade: number | null }>;
 }
 
 let enabled = safeGet("sw-hover") !== "0";
@@ -46,11 +47,19 @@ function hide() { clearTimeout(timer); pop?.remove(); pop = null; current = null
 function body(card: CardSummary, s: Snapshot): HTMLElement {
   const up = (n: number | null) => (n == null ? "" : n >= 0 ? "up" : "down");
   const src: Record<string, string> = { tcgplayer: "TCGplayer EN", cardmarket: "Cardmarket", sammlerwert: tr("Marktwert DE") };
+  const sales = s.sales ?? [];
+  const last = sales[0];
+  // Comps first: the last real sale with how and where it sold; the market series below is reference only.
+  const comps = h("div", { class: "snap-sales" }, h("span", { class: "eyebrow" }, tr("Zuletzt verkauft")),
+    last ? h("div", { class: "snap-last" }, h("b", { class: "snap-value" }, fmt.eur(last.value)), saleBadge(last.listingType), h("small", { class: "muted" }, `${last.company ? `${last.company} ${last.grade}` : last.condition ? label.condition(last.condition) : ""} · ${label.marketplace(last.source)} · ${fmt.date(last.date)}`.replace(/^ · /, "")))
+      : h("p", { class: "muted small" }, tr("Noch kein Verkauf erfasst.")),
+    ...sales.slice(1, 4).map((r) => h("div", { class: "snap-row" }, h("span", null, fmt.date(r.date)), h("b", null, fmt.eur(r.value)), h("small", { class: "muted" }, `${label.listingType(r.listingType)} · ${r.company ? `${r.company} ${r.grade}` : r.condition ? label.condition(r.condition) : ""}`))));
   return h("div", { class: "snap" },
     h("div", { class: "snap-head" }, h("strong", null, cardName(card)), h("span", { class: "muted" }, `#${card.localId} · ${card.setNameDe ?? card.setNameEn ?? ""}`)),
-    s.value == null ? h("p", { class: "muted" }, tr("Noch keine Preisdaten für diese Karte.")) : h("div", null,
+    comps,
+    s.value == null ? h("p", { class: "muted" }, tr("Noch keine Marktpreise für diese Karte.")) : h("div", null,
       h("div", { class: "snap-main" },
-        h("div", null, h("span", { class: "eyebrow" }, src[s.source] ?? s.source), h("b", { class: "snap-value" }, fmt.eur(s.value)),
+        h("div", null, h("span", { class: "eyebrow" }, `${src[s.source] ?? s.source} · ${tr("Referenz")}`), h("b", { class: "snap-value ref" }, fmt.eur(s.value)),
           h("span", { class: `trend ${up(s.change)}` }, s.prev != null ? `${fmt.pct(s.change)} · ${tr("zuvor")} ${fmt.eur(s.prev)}` : "")),
         h("div", { class: "snap-spark" }, sparkline(s.spark.map(([date, value]) => ({ date, value })), s.change1y != null && s.change1y < 0 ? "var(--c-down)" : "var(--c-up)", 140, 44), h("small", { class: "muted" }, s.spark.length >= 2 ? tr("{n} Punkte · 1 Jahr", { n: s.spark.length }) : ""))),
       h("div", { class: "snap-grid" },

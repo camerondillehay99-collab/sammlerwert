@@ -1,5 +1,5 @@
 // Market, auth, settings, pricing pages.
-import { h, svg, icons, fmt, label, toast, cardName } from "../lib/dom.ts";
+import { h, svg, icons, fmt, label, toast, cardName, saleBadge } from "../lib/dom.ts";
 import { api, HttpError, invalidate } from "../lib/api.ts";
 import { navigate } from "../lib/router.ts";
 import { state, setUser, setTheme } from "../lib/store.ts";
@@ -24,8 +24,8 @@ export async function market(_p: Record<string, string>, query: URLSearchParams)
   if (tab === "sales") { page.append(salesFeed(sets, query)); return page; }
   page.append(
     h("p", { class: "muted" }, tr("Datenstand Cardmarket-Preisguide: {hltstatsguid} · {fmtintNumber} bewertete Karten-Varianten · Trends basieren bis zum Aufbau der eigenen Historie auf Cardmarkts 30-Tage-Durchschnitt.", { hltstatsguid: hlt.stats.guideDate ? fmt.date(String(hlt.stats.guideDate)) : "–", fmtintNumber: fmt.int(Number(hlt.stats.quotes)) })),
-    section(tr("Aufsteiger"), m.up.length ? h("div", { class: "tiles" }, ...m.up.map((x) => cardTile(x.card, { value: x.value, trend: x.trend }))) : empty(tr("Noch keine Daten"), tr("Trends erscheinen, sobald Preishistorie vorliegt."))),
-    section(tr("Absteiger"), m.down.length ? h("div", { class: "tiles" }, ...m.down.map((x) => cardTile(x.card, { value: x.value, trend: x.trend }))) : empty(tr("Noch keine Daten"), "")),
+    section(tr("Aufsteiger"), m.up.length ? h("div", { class: "tiles" }, ...m.up.map((x) => cardTile(x.card, { value: x.value, trend: x.trend, sale: false }))) : empty(tr("Noch keine Daten"), tr("Trends erscheinen, sobald Preishistorie vorliegt."))),
+    section(tr("Absteiger"), m.down.length ? h("div", { class: "tiles" }, ...m.down.map((x) => cardTile(x.card, { value: x.value, trend: x.trend, sale: false }))) : empty(tr("Noch keine Daten"), "")),
   );
   return page;
 }
@@ -35,7 +35,7 @@ const GRADES: Record<string, string[]> = { PSA: ["10", "9", "8", "7"], BGS: ["10
 
 /** Gempire-style sold feed: every recorded sale with grader/grade or condition chips, filterable. */
 function salesFeed(sets: SetSummary[], query: URLSearchParams): HTMLElement {
-  const f = { grader: query.get("grader") ?? "", grade: query.get("grade") ?? "", set: query.get("set") ?? "", graded: (query.get("graded") ?? "") as "" | "1" | "0", min: query.get("min") ?? "" };
+  const f = { grader: query.get("grader") ?? "", grade: query.get("grade") ?? "", set: query.get("set") ?? "", graded: (query.get("graded") ?? "") as "" | "1" | "0", min: query.get("min") ?? "", type: query.get("type") ?? "", source: query.get("source") ?? "" };
   const root = h("div", { class: "feed" });
   const list = h("div", { class: "sales-list" });
   const meta = h("p", { class: "muted result-meta" });
@@ -53,16 +53,21 @@ function salesFeed(sets: SetSummary[], query: URLSearchParams): HTMLElement {
     setSel.addEventListener("change", () => { f.set = setSel.value; run(); });
     const min = h("select", { "aria-label": tr("Mindestpreis") }, ...[["", tr("Jeder Preis")], ["10", "≥ 10 €"], ["50", "≥ 50 €"], ["200", "≥ 200 €"], ["1000", "≥ 1.000 €"]].map(([v, t]) => h("option", { value: v, selected: v === f.min }, t))) as HTMLSelectElement;
     min.addEventListener("change", () => { f.min = min.value; run(); });
-    bar.replaceChildren(kind, ...(grades ? [grades] : []), h("div", { class: "feed-selects" }, setSel, min));
+    // Sale type and marketplace: auction results and Buy-It-Now comps are read differently.
+    const types = h("div", { class: "chips" },
+      ...[["", tr("Alle Verkaufsarten")], ["auction", tr("Auktion")], ["fixed_price", tr("Sofortkauf")], ["best_offer", tr("Preisvorschlag")]].map(([v, t]) => h("button", { class: `chip ${f.type === v ? "" : "ghost"} sale-${v || "all"}`, onClick: () => { f.type = v!; run(); } }, t)));
+    const src = h("select", { "aria-label": tr("Marktplatz") }, ...[["", tr("Alle Marktplätze")], ["ebay_de", "eBay.de"], ["ebay", "eBay"], ["fanatics", "Fanatics Collect"], ["heritage", "Heritage Auctions"], ["alt", "Alt"], ["cardmarket", "Cardmarket"], ["user", tr("Community")]].map(([v, t]) => h("option", { value: v, selected: v === f.source }, t))) as HTMLSelectElement;
+    src.addEventListener("change", () => { f.source = src.value; run(); });
+    bar.replaceChildren(kind, ...(grades ? [grades] : []), types, h("div", { class: "feed-selects" }, setSel, min, src));
   }
   async function run(append = false) {
     sync(); filters();
     if (!append) { offset = 0; clear(list); list.appendChild(spinner()); }
     try {
-      const r = await api.salesFeed({ grader: f.grader || null, grade: f.grade || null, set: f.set || null, graded: f.graded || null, min: f.min || null, limit: 50, offset });
+      const r = await api.salesFeed({ grader: f.grader || null, grade: f.grade || null, set: f.set || null, graded: f.graded || null, min: f.min || null, type: f.type || null, source: f.source || null, limit: 50, offset });
       if (!append) clear(list);
       total = r.total; offset += r.items.length;
-      if (!r.items.length && !append) list.appendChild(empty(tr("Noch keine Verkäufe erfasst"), tr("Hier erscheinen echte Verkäufe mit Note bzw. Zustand, Preis und Quelle – eBay.de-Verkäufe werden eingelesen, sobald der eBay-Zugang freigeschaltet ist; Community-Meldungen landen sofort hier.")));
+      if (!r.items.length && !append) list.appendChild(empty(tr("Noch keine Verkäufe erfasst"), tr("Hier erscheinen echte Verkäufe mit Note bzw. Zustand, Preis, Verkaufsart (Auktion / Sofortkauf) und Marktplatz – eBay-Verkäufe werden eingelesen, sobald der eBay-Zugang freigeschaltet ist; Community-Meldungen landen sofort hier.")));
       list.append(...r.items.map(saleRow));
       meta.textContent = total ? tr("{n} Verkäufe", { n: fmt.int(total) }) : "";
       more.hidden = offset >= total;
@@ -76,12 +81,12 @@ function salesFeed(sets: SetSummary[], query: URLSearchParams): HTMLElement {
 
 function saleRow(s: SaleFeedItem): HTMLElement {
   const grade = s.gradingCompany ? h("span", { class: `chip grader-${s.gradingCompany.toLowerCase()}` }, `${s.gradingCompany} ${s.grade ?? ""}`) : h("span", { class: "chip ghost" }, s.condition ? label.condition(s.condition) : tr("Roh"));
-  const src = ({ ebay_de: "eBay.de", ebay: "eBay", cardmarket: "Cardmarket", user: tr("Community"), import: tr("Import") } as Record<string, string>)[s.source] ?? s.source;
+  const src = label.marketplace(s.source);
   return h("div", { class: "sale" },
     h("a", { class: "sale-img", href: `/karte/${encodeURIComponent(s.cardId)}` }, imgOr(cardImage(s.card), () => placeholder(s.card), { alt: cardName(s.card), width: 56, height: 78 })),
     h("div", { class: "sale-body" }, h("a", { class: "sale-title", href: `/karte/${encodeURIComponent(s.cardId)}` }, h("strong", null, cardName(s.card))),
       h("span", { class: "muted" }, `${s.card.setNameDe ?? s.card.setNameEn ?? ""} · #${s.card.localId} · ${label.language(s.language)} · ${label.variant(s.variant)}`),
-      h("div", { class: "chips" }, grade, s.verified ? h("span", { class: "chip ok", title: tr("verifiziert") }, "✓") : null)),
+      h("div", { class: "chips" }, grade, saleBadge(s.listingType), s.verified ? h("span", { class: "chip ok", title: tr("verifiziert") }, "✓") : h("span", { class: "chip ghost", title: tr("von einem Nutzer gemeldet, noch nicht geprüft") }, tr("Community")))),
     h("div", { class: "sale-value" }, h("b", null, fmt.eur(s.priceEur)), h("span", { class: "muted" }, fmt.date(s.soldAt)), s.url ? h("a", { class: "muted small", href: s.url, target: "_blank", rel: "noopener" }, src, " ", svg(icons.external, 11)) : h("span", { class: "muted small" }, src)),
   );
 }
@@ -230,7 +235,7 @@ export function methodik(): HTMLElement {
       h("div", { class: "form" },
         p(tr("Alle Verkäufe werden auf Near Mint normiert (EX ≈ 85 %, GD ≈ 70 % …) und zeitlich gewichtet: ein Verkauf verliert alle 21 Tage die Hälfte seines Gewichts. Ausreißer (mehr als 3 MAD vom Median) werden entfernt.")),
         p(tr("Der Marktwert ist der gewichtete Median der Verkäufe, gemischt mit dem sprachbereinigten Guide-Wert. Je mehr aktuelle Verkäufe, desto mehr zählen sie: bei drei effektiven Verkäufen halbe-halbe, ab etwa zehn fast nur noch Verkäufe.")),
-        p(tr("Bewertete Karten (PSA 10, CGC 9.5 …) werden Grade für Grade aus ihren eigenen Verkäufen berechnet (180 Tage, langsamere Abwertung). Fehlen Verkäufe, wird ehrlich „Schätzung“ angezeigt.")))),
+        p(tr("Comps: Unter jeder Karte steht zuerst der letzte echte Verkauf – mit Verkaufsart (Auktion, Sofortkauf, Preisvorschlag), Marktplatz, Zustand bzw. Note und Datum. Bewertete Karten (PSA 10, CGC 9.5 …) zeigen Note für Note den letzten Verkauf und ab zwei Verkäufen den zeitgewichteten Median (180 Tage). Zustände oder Noten ohne Verkauf bleiben leer – es wird nichts hochgerechnet oder geschätzt.")))),
     section(tr("3 · Konfidenz"),
       h("div", { class: "form" },
         p(h("b", null, tr("Hoch")), tr(" – mehrere aktuelle Verkäufe, die mit dem Guide übereinstimmen. "), h("b", null, tr("Mittel")), tr(" – Guide-Wert mit gelerntem Sprachfaktor oder wenige Verkäufe. "), h("b", null, tr("Niedrig")), tr(" – nur Guide ohne deutschen Faktor, oder nur Angebote.")),

@@ -74,7 +74,7 @@ add("GET", "/api/market/sales", async (req, _p, db) => {
   const u = new URL(req.url);
   const g = (k: string) => u.searchParams.get(k);
   const grade = g("grade") ? Number(g("grade")) : null;
-  const r = await recentSales(db, { grader: g("grader"), grade: grade != null && Number.isFinite(grade) ? grade : null, condition: g("condition"), setId: g("set"), source: g("source"),
+  const r = await recentSales(db, { grader: g("grader"), grade: grade != null && Number.isFinite(grade) ? grade : null, condition: g("condition"), setId: g("set"), source: g("source"), listingType: g("type"),
     graded: g("graded") === "1" ? true : g("graded") === "0" ? false : null, minPrice: g("min") ? Number(g("min")) : null, limit: Number(g("limit") ?? 50), offset: Number(g("offset") ?? 0) });
   return json(r, 200, { "cache-control": "public, max-age=120" });
 });
@@ -113,10 +113,13 @@ add("POST", "/api/cards/:id/sales", async (req, p, db) => {
   const soldAt = str(b.soldAt, 30) ?? new Date().toISOString().slice(0, 10);
   if (Number.isNaN(Date.parse(soldAt)) || Date.parse(soldAt) > Date.now() + 86_400_000) throw badRequest("Ungültiges Datum.");
   const grader = b.gradingCompany ? oneOf(b.gradingCompany, GRADERS, "OTHER") : null;
-  await db.run(`INSERT INTO sales(card_id, language, variant, condition, grading_company, grade, price_eur, shipping_eur, sold_at, source, source_ref, title, url, verified, reporter_user_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'user', ?, ?, ?, 0, ?)`,
+  // Where it sold and how (auction vs. Buy It Now) – the context every comp needs.
+  const marketplace = oneOf(b.marketplace, ["ebay", "fanatics", "heritage", "alt", "cardmarket", "user"], "user");
+  const listingType = oneOf(b.listingType, ["fixed_price", "auction", "best_offer", "unknown"], "unknown");
+  await db.run(`INSERT INTO sales(card_id, language, variant, condition, grading_company, grade, price_eur, shipping_eur, sold_at, source, source_ref, listing_type, title, url, verified, reporter_user_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
     [card.id, oneOf(b.language, LANGS, "de"), await resolveVariant(db, card.id, oneOf(b.variant, VARIANTS, "normal")), b.condition ? oneOf(b.condition, CONDITIONS, "NM") : null,
-    grader, grader ? num(b.grade) : null, price, num(b.shippingEur), soldAt, `u${u.id}-${Date.now()}`, str(b.title, 200), str(b.url, 500), u.id]);
+    grader, grader ? num(b.grade) : null, price, num(b.shippingEur), soldAt, marketplace, `u${u.id}-${Date.now()}`, listingType, str(b.title, 200), str(b.url, 500), u.id]);
   return json(await getCardDetail(db, card.id), 201);
 });
 

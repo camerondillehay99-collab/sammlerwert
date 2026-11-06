@@ -139,12 +139,14 @@ export interface Snapshot {
   low1y: number | null; high1y: number | null; n: number; first: string | null; last: string | null;
   spark: Point[];                                                             // ≤ 60 points, last 12 months
   recent: Array<{ date: string; value: number; source: string }>;             // newest first
+  /** last real sales (newest first, ≤ 5) – the comps shown on hover */
+  sales: Array<{ date: string; value: number; listingType: string; source: string; condition: string | null; company: string | null; grade: number | null }>;
 }
 
 /** The hover-card summary: one series (the richest), compressed. */
-export function snapshotFrom(cardId: string, series: PriceSeries[]): Snapshot {
+export function snapshotFrom(cardId: string, series: PriceSeries[], sales: Snapshot["sales"] = []): Snapshot {
   const pick = [...series].sort((a, b) => rank(a) - rank(b) || b.points.length - a.points.length)[0];
-  const empty: Snapshot = { cardId, source: "sammlerwert", label: "", currency: "EUR", value: null, prev: null, change: null, change30: null, change1y: null, low1y: null, high1y: null, n: 0, first: null, last: null, spark: [], recent: [] };
+  const empty: Snapshot = { cardId, source: "sammlerwert", label: "", currency: "EUR", value: null, prev: null, change: null, change30: null, change1y: null, low1y: null, high1y: null, n: 0, first: null, last: null, spark: [], recent: [], sales };
   if (!pick || !pick.points.length) return empty;
   const pts = pick.points;
   const last = pts[pts.length - 1]!, prev = pts[pts.length - 2] ?? null;
@@ -161,6 +163,7 @@ export function snapshotFrom(cardId: string, series: PriceSeries[]): Snapshot {
     n: pts.length, first: pts[0]![0], last: last[0],
     spark: downsample(year.length >= 2 ? year : pts, 60),
     recent: pts.slice(-5).reverse().map(([date, value]) => ({ date, value, source: pick.source })),
+    sales,
   };
 }
 const rank = (s: PriceSeries) => (s.source === "tcgplayer" && s.points.length >= 30 ? 0 : s.source === "sammlerwert" ? 1 : s.source === "tcgplayer" ? 2 : 3);

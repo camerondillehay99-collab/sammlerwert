@@ -131,14 +131,29 @@ describe("API", () => {
     expect(items[0].source).toBe("import:collectr");
     await call("POST", "/api/items/bulk", { action: "delete", ids: items.map((i: { id: number }) => i.id) });
   });
-  test("collection CRUD, valuation and plan limits", async () => {
+  test("collection CRUD, comps-based valuation and plan limits", async () => {
+    // An EX card without an EX/GD comp is not estimated from the NM market price – it stays unvalued.
     const add = await call("POST", "/api/items", { cardId: "sv03.5-199", language: "de", condition: "EX", purchasePriceEur: 120, quantity: 2 });
     expect(add.status).toBe(201);
-    expect(add.body.item.currentValue).toBeCloseTo(190 * 0.85, 2);
-    const p = (await call("GET", "/api/portfolio")).body;
-    expect(p.totalValue).toBeCloseTo(190 * 0.85 * 2, 1); expect(p.totalCost).toBe(240); expect(p.insights.length).toBeGreaterThan(0);
+    expect(add.body.item.currentValue).toBeNull(); expect(add.body.item.valueBasis).toBeNull();
+    let p = (await call("GET", "/api/portfolio")).body;
+    expect(p.totalValue).toBe(0); expect(p.unvaluedCount).toBe(2); expect(p.totalCost).toBe(240);
+    // A raw NM card falls back to the market price (Cardmarket trend × factor) and says so.
+    const nm = await call("PATCH", `/api/items/${add.body.item.id}`, { condition: "NM" });
+    expect(nm.body.item.currentValue).toBeCloseTo(190, 1); expect(nm.body.item.valueBasis).toBe("market");
+    // Graded: only a real graded comp counts; none → unvalued, one → last sold price.
     const upd = await call("PATCH", `/api/items/${add.body.item.id}`, { gradingCompany: "PSA", grade: 10, quantity: 1 });
-    expect(upd.body.item.currentValue).toBeCloseTo(190 * 3, 2);
+    expect(upd.body.item.currentValue).toBeNull();
+    await db.run("INSERT INTO sales(card_id, language, variant, condition, grading_company, grade, price_eur, sold_at, source, source_ref, listing_type, verified) VALUES ('sv03.5-199','en','holo',NULL,'PSA',10,777,?, 'ebay_de','t-psa10','auction',1)", [new Date().toISOString()]);
+    const comp = (await call("GET", "/api/items")).body.items[0];
+    expect(comp.currentValue).toBe(777); expect(comp.valueBasis).toBe("comp");
+    p = (await call("GET", "/api/portfolio")).body;
+    expect(p.totalValue).toBe(777); expect(p.unvaluedCount).toBe(0); expect(p.insights.length).toBeGreaterThan(0);
+    const card = (await call("GET", "/api/cards/sv03.5-199")).body;
+    expect(card.lastSale.priceEur).toBe(777); expect(card.lastSale.listingType).toBe("auction");
+    expect(card.graded.length).toBe(1); expect(card.graded[0].value).toBe(777); expect(card.graded[0].lastListingType).toBe("auction");
+    expect(card.conditions.every((c: { value: number | null }) => c.value == null)).toBe(true);
+    await db.run("DELETE FROM sales WHERE source_ref = 't-psa10'");
     expect((await call("POST", "/api/items", { cardId: "unknown" })).status).toBe(400);
     expect((await call("POST", "/api/items", { cardId: "sv03.5-025", quantity: 60 })).status).toBe(402); // free plan: 50 cards
     expect((await call("DELETE", `/api/items/${add.body.item.id}`)).status).toBe(200);
@@ -146,8 +161,12 @@ describe("API", () => {
   });
   test("community sale report reprices the card", async () => {
     const before = (await call("GET", "/api/cards/sv03.5-199")).body.prices.find((p: { language: string }) => p.language === "de").value;
-    const r = await call("POST", "/api/cards/sv03.5-199/sales", { priceEur: 120, soldAt: new Date().toISOString().slice(0, 10), language: "de", condition: "NM" });
+    const r = await call("POST", "/api/cards/sv03.5-199/sales", { priceEur: 120, soldAt: new Date().toISOString().slice(0, 10), language: "de", condition: "NM", marketplace: "fanatics", listingType: "auction" });
     expect(r.status).toBe(201);
+    expect(r.body.sales[0].source).toBe("fanatics"); expect(r.body.sales[0].listingType).toBe("auction");
+    expect(r.body.conditions[0].value).toBe(120); expect(r.body.conditions[0].lastListingType).toBe("auction"); expect(r.body.conditions[0].lastSource).toBe("fanatics");
+    const feed = (await call("GET", "/api/market/sales?type=auction&source=fanatics")).body;
+    expect(feed.total).toBe(1); expect(feed.items[0].card.id).toBe("sv03.5-199");
     const after = r.body.prices.find((p: { language: string }) => p.language === "de");
     expect(after.value).toBeLessThan(before); expect(after.nSales30d).toBe(1); expect(after.method).toBe("sales+guide");
     // unverified community sales do not move the language factor on their own

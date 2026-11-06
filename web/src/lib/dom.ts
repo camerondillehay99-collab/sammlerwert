@@ -114,7 +114,16 @@ export const label = {
     "sales+guide": "Verkäufe + Cardmarket-Preisguide", sales_only: "Nur Verkäufe", "guide×language_factor": "Cardmarket-Preisguide, sprachbereinigt",
     guide_only: "Cardmarket-Preisguide (alle Sprachen)", listings_only: "Nur aktive Angebote", none: "Keine Daten",
   } as Record<string, string>)[m.replace("+listings", "")] ?? m),
+  /** how a sale closed – shown next to every comp */
+  listingType: (t: string | null | undefined) => tr(({ fixed_price: "Sofortkauf", auction: "Auktion", best_offer: "Preisvorschlag", unknown: "Verkauf" } as Record<string, string>)[t ?? "unknown"] ?? "Verkauf"),
+  /** where a sale closed */
+  marketplace: (s: string | null | undefined) => ({ ebay_de: "eBay.de", ebay: "eBay", fanatics: "Fanatics Collect", heritage: "Heritage Auctions", alt: "Alt", cardmarket: "Cardmarket", user: tr("Community"), import: tr("Import") } as Record<string, string>)[s ?? ""] ?? (s ?? "–"),
 };
+
+/** Compact comp line: "€12,50 · Auktion · eBay · 03.11." */
+export function saleBadge(t: string | null | undefined): HTMLElement {
+  return h("span", { class: `badge sale-${t ?? "unknown"}` }, label.listingType(t));
+}
 
 export function cardImage(card: Pick<CardSummary, "image" | "imageEn">, quality: "low" | "high" = "low"): string | null {
   const base = card.image ?? card.imageEn;

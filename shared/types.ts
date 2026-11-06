@@ -4,7 +4,14 @@ export type Language = "de" | "en" | "jp" | "fr" | "it" | "es" | "pt" | "other";
 export type Variant = "normal" | "reverse" | "holo" | "firstEdition" | "promo";
 export type Condition = "MT" | "NM" | "EX" | "GD" | "LP" | "PL" | "PO";
 export type GradingCompany = "PSA" | "BGS" | "CGC" | "GSG" | "AP" | "TAG" | "ACE" | "OTHER";
-export type SaleSource = "ebay_de" | "ebay" | "cardmarket" | "user" | "import";
+export type SaleSource = "ebay_de" | "ebay" | "cardmarket" | "fanatics" | "heritage" | "alt" | "user" | "import";
+/** How a sale closed – collectors read auction results and Buy-It-Now comps differently. */
+export type ListingType = "fixed_price" | "auction" | "best_offer" | "unknown";
+/** The newest real sale of a card – the number the industry quotes under a card. */
+export interface LastSale {
+  priceEur: number; soldAt: string; listingType: ListingType; source: SaleSource;
+  condition: Condition | null; gradingCompany: GradingCompany | null; grade: number | null; url: string | null;
+}
 export type Plan = "free" | "sammler" | "pro";
 
 export const LANGUAGE_LABELS: Record<Language, string> = {
@@ -50,6 +57,8 @@ export interface CardSummary {
   valueEn: number | null;
   confidenceDe: number | null;
   trend30: number | null;
+  /** newest real sale (any language/condition) – null until one is recorded */
+  lastSale: LastSale | null;
 }
 
 export interface PriceQuote {
@@ -87,15 +96,19 @@ export interface CardDetail extends CardSummary {
   /** TCGplayer product id (English print) when matched */
   tcgpProductId: number | null;
   sales: SaleRecord[];
-  /** value per grading company and grade, from real graded sales (method "sales") or estimated (method "multiplier") */
+  /** comps per grading company and grade – only from real graded sales, never estimated */
   graded: GradedValue[];
-  /** condition ladder NM → DMG */
+  /** comps per condition NM → DMG – only from real raw sales, never estimated */
   conditions: ConditionValue[];
 }
 
 export interface GradedValue {
-  company: string; grade: number; value: number; low: number | null; high: number | null;
-  n: number; n90: number; lastSoldAt: string | null; method: "sales" | "multiplier";
+  company: string; grade: number;
+  /** last sold price (EUR) */
+  value: number;
+  /** time-weighted median of the last 180 days when ≥ 2 sales exist */
+  median: number | null; low: number | null; high: number | null;
+  n: number; n90: number; lastSoldAt: string | null; lastListingType: ListingType; lastSource: SaleSource; lastUrl: string | null; method: "sales";
 }
 
 export interface CardmarketGuidePoint {
@@ -119,15 +132,17 @@ export interface PriceSeries {
   points: Array<[date: string, value: number]>;
 }
 
-/** Value per condition on the US scale (NM/LP/MP/HP/DMG) with the Cardmarket equivalents; estimated from NM until sales exist. */
+/** Comps per condition on the US scale (NM/LP/MP/HP/DMG) with the Cardmarket equivalents – last sold only, null without a sale. */
 export interface ConditionValue {
   code: "NM" | "LP" | "MP" | "HP" | "DMG";
   cardmarket: Condition[];
   label: string;
-  multiplier: number;
+  /** last sold price (EUR) in that bucket, null when no sale was recorded */
   value: number | null;
+  median: number | null;                        // time-weighted median (180 days) when ≥ 2 sales
   n: number;                                    // sales in that bucket (180 days)
-  method: "sales" | "estimate";
+  lastSoldAt: string | null; lastListingType: ListingType | null; lastSource: SaleSource | null; lastUrl: string | null;
+  method: "sales" | "none";
 }
 
 export interface SaleRecord {
@@ -142,6 +157,7 @@ export interface SaleRecord {
   shippingEur: number | null;
   soldAt: string;
   source: SaleSource;
+  listingType: ListingType;
   title: string | null;
   url: string | null;
   verified: boolean;
@@ -177,6 +193,8 @@ export interface CollectionItem {
   card: CardSummary;
   quote: PriceQuote | null;
   currentValue: number | null; // per unit
+  /** "comp" = last sold price of a matching sale, "market" = Cardmarket/TCGplayer market price (raw NM only), null = no comp */
+  valueBasis: "comp" | "market" | null;
 }
 
 export interface PortfolioSummary {
@@ -191,6 +209,8 @@ export interface PortfolioSummary {
   bySet: Array<{ setId: string; setName: string; value: number; count: number }>;
   /** raw vs. graded (per company) */
   byKind: Array<{ kind: string; value: number; count: number }>;
+  /** items (quantity) without any comp or market price – not part of totalValue */
+  unvaluedCount: number;
   topHoldings: CollectionItem[];
   movers: Array<{ item: CollectionItem; change30: number }>;
   history: PricePoint[];

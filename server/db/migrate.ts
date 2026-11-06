@@ -17,6 +17,7 @@ const COLUMNS: Array<[table: string, column: string, ddl: string]> = [
   ["collections", "sort_order", "INTEGER NOT NULL DEFAULT 0"],
   ["collection_items", "source", "TEXT"],
   ["cards", "tcgp_product_id", "INTEGER"],
+  ["sales", "listing_type", "TEXT NOT NULL DEFAULT 'unknown'"],
 ];
 
 const TABLES: string[] = [

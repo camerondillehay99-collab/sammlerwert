@@ -143,7 +143,7 @@ export async function collection(_p: Record<string, string>, query: URLSearchPar
         h("div", { class: "item-badges" }, confidenceBadge(it.quote?.confidence), coll ? h("span", { class: "chip ghost" }, svg(icons.folder, 12), ` ${coll.name}`) : null, it.notes ? h("span", { class: "chip ghost", title: it.notes }, tr("Notiz")) : null, it.source === "scan" ? h("span", { class: "chip ghost", title: tr("Per Scanner hinzugefügt") }, svg(icons.camera, 12)) : null)),
       h("div", { class: "item-values" },
         h("b", null, fmt.eur(it.currentValue != null ? it.currentValue * it.quantity : null)),
-        h("div", { class: "small" }, trendPill(it.quote?.trend30)),
+        h("div", { class: "small" }, it.valueBasis === "comp" ? h("span", { class: "badge sale-comp" }, tr("Comp")) : it.valueBasis === "market" ? h("span", { class: "muted" }, tr("Trend")) : h("span", { class: "muted" }, tr("kein Comp")), " ", trendPill(it.quote?.trend30)),
         p != null ? h("div", { class: `small trend ${p >= 0 ? "up" : "down"}` }, `${p >= 0 ? "+" : ""}${fmt.eur(p)}`) : h("div", { class: "small muted" }, it.purchasePriceEur != null ? "" : tr("kein Kaufpreis"))),
       h("div", { class: "item-actions" }, qtyStepper(it), h("button", { class: "icon-btn", "aria-label": tr("Bearbeiten"), onClick: () => addToCollection(it.card, it, { collections }) }, svg(icons.edit, 18)), trash),
     );
@@ -156,7 +156,7 @@ export async function collection(_p: Record<string, string>, query: URLSearchPar
       h("a", { class: "tile-img", href: `/karte/${encodeURIComponent(it.cardId)}` }, imgOr(img, () => placeholder(it.card)), it.quantity > 1 ? h("span", { class: "qty" }, `${it.quantity}×`) : null, it.gradingCompany ? h("span", { class: "grade-tag" }, `${it.gradingCompany} ${it.grade ?? ""}`) : null),
       h("div", { class: "tile-body" }, h("div", { class: "tile-title" }, h("strong", null, cardName(it.card)), h("span", { class: "num" }, `#${it.card.localId}`)),
         h("div", { class: "tile-sub" }, `${label.language(it.language)} · ${it.gradingCompany ? `${it.gradingCompany} ${it.grade ?? ""}` : label.condition(it.condition)}`),
-        h("div", { class: "tile-price" }, h("b", null, fmt.eur(it.currentValue != null ? it.currentValue * it.quantity : null)), trendPill(it.quote?.trend30))),
+        h("div", { class: "tile-price" }, h("b", null, fmt.eur(it.currentValue != null ? it.currentValue * it.quantity : null)), h("small", { class: "muted basis" }, it.valueBasis === "comp" ? tr("Comp") : it.valueBasis === "market" ? tr("Trend") : tr("kein Comp")), trendPill(it.quote?.trend30))),
       h("div", { class: "tile-tools" }, h("button", { class: "icon-btn", "aria-label": tr("Bearbeiten"), onClick: () => addToCollection(it.card, it, { collections }) }, svg(icons.edit, 16)), h("button", { class: "icon-btn danger", "aria-label": tr("Entfernen"), onClick: (e: Event) => removeItem(it, (e.currentTarget as HTMLElement).parentElement!) }, svg(icons.trash, 16))),
     );
   }

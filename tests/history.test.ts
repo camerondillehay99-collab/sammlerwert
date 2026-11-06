@@ -105,13 +105,14 @@ describe("price_series append + card series", () => {
 });
 
 describe("condition ladder", () => {
-  test("estimates from NM until two sales exist in a bucket", () => {
+  test("comps per rung: last sold with sale type; rungs without a sale stay empty", () => {
     const now = "2026-11-04T00:00:00Z";
-    const l = conditionLadder([{ price: 40, soldAt: "2026-10-30", condition: "EX" }, { price: 44, soldAt: "2026-10-20", condition: "GD" }], 100, now);
+    const l = conditionLadder([{ price: 40, soldAt: "2026-10-30", condition: "EX", listingType: "auction", source: "ebay_de" }, { price: 44, soldAt: "2026-10-20", condition: "GD" }], now);
     expect(l.map((c) => c.code)).toEqual(["NM", "LP", "MP", "HP", "DMG"]);
-    expect(l[0]!.value).toBe(100); expect(l[0]!.method).toBe("estimate");
-    expect(l[1]!.method).toBe("sales"); expect(l[1]!.value).toBeGreaterThan(39); expect(l[1]!.value).toBeLessThan(45);
-    expect(l[4]!.value).toBe(30);
-    expect(conditionLadder([], null, now).every((c) => c.value == null)).toBe(true);
+    expect(l[0]!.value).toBeNull(); expect(l[0]!.method).toBe("none");
+    expect(l[1]!.method).toBe("sales"); expect(l[1]!.value).toBe(40); expect(l[1]!.n).toBe(2); expect(l[1]!.lastListingType).toBe("auction"); expect(l[1]!.lastSoldAt).toBe("2026-10-30");
+    expect(l[1]!.median!).toBeGreaterThan(39); expect(l[1]!.median!).toBeLessThan(45);
+    expect(l[4]!.value).toBeNull();
+    expect(conditionLadder([], now).every((c) => c.value == null && c.method === "none")).toBe(true);
   });
 });

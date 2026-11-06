@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS sales (
   sold_at TEXT NOT NULL,
   source TEXT NOT NULL,              -- ebay_de | ebay | cardmarket | user | import
   source_ref TEXT,                   -- external id (dedupe)
+  listing_type TEXT NOT NULL DEFAULT 'unknown', -- fixed_price | auction | best_offer | unknown
   title TEXT,
   url TEXT,
   verified INTEGER NOT NULL DEFAULT 0,
