@@ -16,15 +16,15 @@ import { saleRow, populationBlock } from "../components/sales.ts";
 import { tr } from "../lib/i18n.ts";
 
 export async function cardView(params: Record<string, string>, query: URLSearchParams): Promise<HTMLElement> {
-  const [card, owned] = await Promise.all([api.card(params.id!), state.user ? api.items().then((r) => r.items.filter((i) => i.cardId === params.id)).catch(() => [] as CollectionItem[]) : Promise.resolve([] as CollectionItem[])]);
+  const [card, owned, hlt] = await Promise.all([api.card(params.id!), state.user ? api.items().then((r) => r.items.filter((i) => i.cardId === params.id)).catch(() => [] as CollectionItem[]) : Promise.resolve([] as CollectionItem[]), api.health().catch(() => null)]);
   const root = h("div", { class: "page card-page" });
   let current = card;
-  const render = () => { clear(root); root.append(...build(current, owned, query, (c) => { current = c; render(); })); };
+  const render = () => { clear(root); root.append(...build(current, owned, query, (c) => { current = c; render(); }, !!hlt?.compsOnDemand)); };
   render();
   return root;
 }
 
-function build(card: CardDetail, owned: CollectionItem[], query: URLSearchParams, update: (c: CardDetail) => void): HTMLElement[] {
+function build(card: CardDetail, owned: CollectionItem[], query: URLSearchParams, update: (c: CardDetail) => void, compsOnDemand = false): HTMLElement[] {
   const img = cardImage(card, "high");
   const de = card.prices.filter((p) => p.language === "de");
   const en = card.prices.filter((p) => p.language === "en");
@@ -61,6 +61,21 @@ function build(card: CardDetail, owned: CollectionItem[], query: URLSearchParams
   const rowsHead = h("div", { class: "section-head" });
   let showAll = false;
 
+  /** "Refresh eBay sales" – logged-in users pull the latest sold items of this card (server-side budget; no-op when not configured). */
+  function refreshButton(): HTMLElement | null {
+    if (!state.user || !compsOnDemand) return null;
+    const btn = h("button", { class: "btn ghost", onClick: async () => {
+      btn.disabled = true;
+      try {
+        const r = await api.refreshComps(card.id);
+        if (r.refreshed) { toast(r.sales ? tr("{n} eBay-Verkäufe geladen.", { n: r.sales }) : tr("Keine neuen eBay-Verkäufe gefunden.")); invalidate("/api/cards/"); invalidate("/api/market/sales"); update(await api.card(card.id)); }
+        else toast(r.reason === "fresh" ? tr("Die eBay-Verkäufe dieser Karte sind aktuell (höchstens 2 Tage alt).") : r.reason === "budget" ? tr("Das Tageskontingent für Sofort-Abrufe ist aufgebraucht – die Karte wird heute Nacht aktualisiert.") : tr("Verkaufsdaten-Abruf ist derzeit nicht verfügbar."), r.reason === "fresh" ? "ok" : "error");
+      } catch (e) { toast((e as Error).message, "error"); }
+      btn.disabled = false;
+    } }, svg(icons.refresh, 16), tr(" eBay-Verkäufe aktualisieren"));
+    return btn;
+  }
+
   function drawProfile() {
     chips.replaceChildren(...options.map((o) => h("button", { class: `chip ${filterKey(o) === filterKey(filter) ? "" : "ghost"} ${o.kind === "graded" ? `grader-${o.company.toLowerCase()}` : ""}`, "aria-pressed": String(filterKey(o) === filterKey(filter)), onClick: () => { filter = o; const p = new URLSearchParams(location.search); if (o.kind === "all") p.delete("profil"); else p.set("profil", filterKey(o)); history.replaceState(null, "", `${location.pathname}${p.size ? `?${p}` : ""}`); drawProfile(); panel.redraw(); } }, o.label)));
     const sales = filterSales(card.sales, filter);
@@ -86,7 +101,7 @@ function build(card: CardDetail, owned: CollectionItem[], query: URLSearchParams
     const link = h("a", { class: "link", href: `/verkaeufe?card=${encodeURIComponent(card.id)}${filter.kind === "graded" ? `&grader=${filter.company}&grade=${filter.grade}` : filter.kind === "raw" ? "&graded=0" : ""}` }, tr("Alle Verkäufe"), svg(icons.chevron, 14));
     rowsHead.replaceChildren(h("h3", { class: "sub" }, sales.length ? tr("{n} Verkäufe", { n: sales.length }) : tr("Verkäufe")), link);
     clear(rowsBox);
-    if (!sales.length) { rowsBox.append(h("p", { class: "muted" }, tr("Noch keine Verkäufe für dieses Profil erfasst. eBay-Verkäufe laufen ein, sobald eBay den Zugang zu Verkaufsdaten freigeschaltet hat; eigene Verkäufe kannst du jederzeit melden.")), h("button", { class: "btn ghost", onClick: () => reportSale(card, update) }, svg(icons.flag, 16), tr(" Verkauf melden"))); return; }
+    if (!sales.length) { rowsBox.append(h("p", { class: "muted" }, tr("Noch keine Verkäufe für dieses Profil erfasst. eBay-Verkäufe (eBay.de und eBay.com, deutsch, englisch und japanisch) werden laufend eingelesen; eigene Verkäufe kannst du jederzeit melden.")), h("div", { class: "actions-row" }, refreshButton(), h("button", { class: "btn ghost", onClick: () => reportSale(card, update) }, svg(icons.flag, 16), tr(" Verkauf melden")))); return; }
     const shown = showAll ? sales : sales.slice(0, 10);
     rowsBox.append(...shown.map((s) => saleRow(s, { card, showCard: false })));
     if (sales.length > shown.length) rowsBox.append(h("div", { class: "center" }, h("button", { class: "btn ghost", onClick: () => { showAll = true; drawRows(sales); } }, tr("Alle {n} anzeigen", { n: sales.length }))));
@@ -103,7 +118,7 @@ function build(card: CardDetail, owned: CollectionItem[], query: URLSearchParams
         h("div", { class: "price-row" }, h("b", null, fmt.eur(primaryDe.value)), trendPill(primaryDe.trend30, " / 30 T."), confidenceBadge(primaryDe.confidence),
           primaryEn && primaryEn.value != null && primaryDe.value != null && primaryEn.value !== primaryDe.value ? h("span", { class: "muted small" }, `${tr("Englisch")} ${fmt.eur(primaryEn.value)}`) : null),
         h("p", { class: "method muted" }, `Basis: ${label.method(primaryDe.method)} · `, h("a", { href: "/methodik" }, tr("Methodik")))) : null,
-      h("div", { class: "actions-row" }, h("button", { class: "btn ghost", onClick: () => reportSale(card, update) }, svg(icons.flag, 16), tr(" Verkauf melden")),
+      h("div", { class: "actions-row" }, refreshButton(), h("button", { class: "btn ghost", onClick: () => reportSale(card, update) }, svg(icons.flag, 16), tr(" Verkauf melden")),
         h("a", { class: "btn ghost", href: `/verkaeufe?card=${encodeURIComponent(card.id)}` }, tr("Alle Verkäufe"), svg(icons.chevron, 14))),
     ),
   );

@@ -48,7 +48,7 @@ export interface PsaCertPublic { certNo: string; year: string | null; brand: str
 export interface SharedCollection { collection: { name: string; description: string | null; owner: string }; items: Array<{ id: number; cardId: string; card: CardSummary; language: string; variant: string; condition: string; gradingCompany: string | null; grade: number | null; quantity: number; currentValue: number | null; trend30: number | null }>; totalValue: number; cardCount: number }
 
 export const api = {
-  health: () => cached<{ ok: boolean; stats: Record<string, number | string | null>; ebay: boolean; billing: boolean }>("/api/health", 60_000),
+  health: () => cached<{ ok: boolean; stats: Record<string, number | string | null>; ebay: boolean; billing: boolean; compsOnDemand?: boolean; comps?: { at: string; cards: number; sales: number; requests: number; stopped: string | null } | null }>("/api/health", 60_000),
   me: () => call<AuthResult>("GET", "/api/auth/me"),
   register: (email: string, password: string, name: string) => call<AuthResult>("POST", "/api/auth/register", { email, password, name }),
   login: (email: string, password: string) => call<AuthResult>("POST", "/api/auth/login", { email, password }),
@@ -88,6 +88,7 @@ export const api = {
     return cached<{ items: SaleFeedItem[]; total: number; summary: SalesFeedSummary | null }>(`/api/market/sales?${p}`, 60_000);
   },
   population: (id: string) => call<{ items: Population[] }>("GET", `/api/cards/${encodeURIComponent(id)}/population`),
+  refreshComps: (id: string) => call<{ refreshed: boolean; reason?: string; sales?: number }>("POST", `/api/cards/${encodeURIComponent(id)}/comps`, {}),
   requestPopulation: (id: string, cert?: string) => call<{ items: Population[]; refreshed: boolean }>("POST", `/api/cards/${encodeURIComponent(id)}/population`, cert ? { cert } : {}),
   sets: () => cached<{ items: SetSummary[] }>("/api/sets", 300_000),
   set: (id: string, sort = "number") => cached<{ set: SetSummary; cards: CardSummary[] }>(`/api/sets/${encodeURIComponent(id)}?sort=${sort}`, 120_000),

@@ -12,6 +12,7 @@ import { scanAvailable, scanImage } from "../scan.ts";
 import { UI_LANGS, uiDictionary, i18nLastError } from "../i18n.ts";
 import { getPopulations, refreshPsaPopulation, PopError } from "../services/population.ts";
 import { resolveCert } from "../psa.ts";
+import { refreshCardComps, compsConfigured } from "../ingest/comps.ts";
 
 import { add } from "./router.ts";
 export { matchRoute, hasPath } from "./router.ts";
@@ -24,6 +25,8 @@ import "./import-routes.ts";
 // ---------- meta ----------
 add("GET", "/api/health", async (req, _p, db) => json({ ok: true, brand: config.brand.name, stats: await catalogStats(db), ebay: ebayConfigured(),
   ebayInsights: await memo(db, "ebay_insights", 300_000, async () => (await db.first<{ value: string }>("SELECT value FROM meta WHERE key = 'ebay_insights'"))?.value ?? null),
+  comps: await memo(db, "comps_status", 300_000, async () => { const v = (await db.first<{ value: string }>("SELECT value FROM meta WHERE key = 'comps_status'"))?.value; try { return v ? JSON.parse(v) : null; } catch { return v ?? null; } }),
+  compsOnDemand: compsConfigured(),
   billing: stripeConfigured(), uploads: !!blobStore(), scan: scanAvailable(), edge: (req as Request & { cf?: { colo?: string } }).cf?.colo ?? null },
   200, { "cache-control": "public, max-age=60" }));
 
@@ -116,6 +119,15 @@ add("POST", "/api/cards/:id/population", async (req, p, db) => {
   try { await refreshPsaPopulation(db, card.id, specId); }
   catch (e) { if (e instanceof PopError) throw new ApiError(e.status === 429 ? 429 : 502, e.message); throw e; }
   return json({ items: await getPopulations(db, card.id), refreshed: true });
+});
+/** Logged-in users may pull a card's latest eBay sold items now (CompsAPI; per-card 2-day and per-day request limits). */
+add("POST", "/api/cards/:id/comps", async (req, p, db) => {
+  await requireUser(db, req);
+  if (!compsConfigured()) throw new ApiError(503, "Verkaufsdaten-Abruf ist auf diesem Server nicht eingerichtet.");
+  const card = (await getCardSummaries(db, [p.id!])).get(p.id!);
+  if (!card) throw notFound("Karte nicht gefunden.");
+  const r = await refreshCardComps(db, card.id);
+  return json(r, 200, { "cache-control": "no-store" });
 });
 add("GET", "/api/cards/:id/snapshot", async (_r, p, db) => {
   const snap = await getCardSnapshot(db, p.id!);

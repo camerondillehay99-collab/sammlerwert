@@ -293,6 +293,15 @@ CREATE TABLE IF NOT EXISTS populations (
 );
 CREATE INDEX IF NOT EXISTS idx_populations_spec ON populations(company, spec_id);
 
+-- Per-card bookkeeping for the sold-comps rotation (CompsAPI → sales; see server/ingest/comps.ts dueCompsCards).
+CREATE TABLE IF NOT EXISTS comps_refresh (
+  card_id TEXT PRIMARY KEY REFERENCES cards(id),
+  last_at TEXT NOT NULL,
+  sales INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  backfilled INTEGER NOT NULL DEFAULT 0   -- 1 once the full history (all sites, all pages) has been swept
+);
+
 -- Machine-translated UI strings for languages beyond German/English (see server/i18n.ts)
 CREATE TABLE IF NOT EXISTS ui_translations (
   lang TEXT NOT NULL,

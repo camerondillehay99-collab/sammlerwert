@@ -24,6 +24,7 @@ import { TCGCSV_FIRST_ARCHIVE, matchCardsToTcgplayer, refreshTcgplayerDaily } fr
 import { ensureFx } from "../server/ingest/fx.ts";
 import { runTcgpBackfill } from "./tcgp-backfill.ts";
 import { refreshPsaPopulations } from "../server/services/population.ts";
+import { compsBacklog, compsConfigured, runCompsIngest } from "../server/ingest/comps.ts";
 
 const log = (m: string) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${m}`);
 const env = process.env;
@@ -35,7 +36,7 @@ if (!accountId || !apiToken || !databaseId) { console.error("CLOUDFLARE_ACCOUNT_
 applyEnv({ ...env, INGEST_DELAY_MS: env.INGEST_DELAY_MS ?? "40", CATALOG_COMPLETION_BATCH: env.DETAIL_BATCH ?? "2500" });
 const db = new D1HttpDb({ accountId, databaseId, apiToken });
 // An empty workflow input arrives as "" on scheduled runs – fall back to the full default list then.
-const DEFAULT_STEPS = "details,catalog,guide,tcgp,fx,ebay,factors,pops,tcgp_backfill";
+const DEFAULT_STEPS = "details,catalog,guide,tcgp,fx,ebay,comps,factors,pops,tcgp_backfill";
 const steps = new Set((env.STEPS?.trim() || DEFAULT_STEPS).split(",").map((s) => s.trim()).filter(Boolean));
 const weekday = new Date().getUTCDay();
 const t0 = Date.now();
@@ -76,6 +77,13 @@ CREATE TABLE IF NOT EXISTS deploy_patches (id INTEGER PRIMARY KEY AUTOINCREMENT,
   }
   if (steps.has("fx")) log(`Wechselkurse USD→EUR: ${await ensureFx(db, TCGCSV_FIRST_ARCHIVE)} Tage`);
   if (steps.has("ebay") && ebayConfigured()) log(`eBay: ${JSON.stringify(await runEbayIngest(db, undefined, log))}`);
+  // Real eBay sold items (eBay.de + eBay.com via CompsAPI). Nightly: COMPS_DAILY_REQUESTS. `comps_backfill` (dispatch):
+  // spend COMPS_BACKFILL_REQUESTS within the workflow's time limit on the never-swept cards – resumable, most valuable first.
+  if ((steps.has("comps") || steps.has("comps_backfill")) && compsConfigured()) {
+    const backfill = steps.has("comps_backfill");
+    const minutes = Number(env.COMPS_BACKFILL_MINUTES ?? "0") || (backfill ? 330 : 30);
+    log(`Verkäufe (CompsAPI): ${JSON.stringify(await runCompsIngest(db, { budget: backfill ? Number(env.COMPS_BACKFILL_REQUESTS ?? "40000") : undefined, budgetMs: minutes * 60_000 }, log))} · Backlog ${await compsBacklog(db)} Karten`);
+  } else if (steps.has("comps") || steps.has("comps_backfill")) log("Verkäufe (CompsAPI): kein COMPSAPI_KEY – übersprungen");
   if (steps.has("factors")) log(`Sprachfaktoren: ${JSON.stringify(await recomputeFactors(db))}`);
   if (steps.has("pops")) log(`PSA-Populationen: ${JSON.stringify(await refreshPsaPopulations(db, Number(env.PSA_POP_BUDGET ?? "60"), log))}`);
   if (steps.has("tcgp_backfill")) {

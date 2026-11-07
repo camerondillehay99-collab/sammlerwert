@@ -44,6 +44,18 @@ export function buildConfig(e: EnvMap) {
       insightsEnabled: !e.EBAY_INSIGHTS_ENABLED?.trim() ? null : bool(e.EBAY_INSIGHTS_ENABLED, true),
       maxCardsPerRun: Number(env("EBAY_MAX_CARDS_PER_RUN", "700")),
     },
+    comps: {
+      /** compsapi.com key: real eBay sold items (3 years) for the Sales page. Nightly sweep in GitHub Actions; on-demand refresh in the Worker when set there too. */
+      apiKey: env("COMPSAPI_KEY").trim().replace(/^bearer\s+/i, ""),
+      /** requests a nightly run may spend (plans: Growth 25 000 / month ≈ 800 / day, Pro 100 000 ≈ 3 200 / day) */
+      dailyRequests: Number(env("COMPS_DAILY_REQUESTS", "800")),
+      /** requests per day for card-page refreshes by logged-in users */
+      onDemandDailyRequests: Number(env("COMPS_ONDEMAND_REQUESTS", "150")),
+      /** eBay sites swept, in order (DE = eBay.de in EUR, US = eBay.com in USD) */
+      sites: list(e.COMPS_SITES, "DE,US").map((s) => s.toUpperCase()),
+      /** how far the first (backfill) sweep of a card looks back; paid plans allow up to 1095 days */
+      historyDays: Number(env("COMPS_HISTORY_DAYS", "1095")),
+    },
     psa: {
       /** PSA Public API token (psacard.com → Public API). Enables certificate lookups for slabs and PSA list imports. */
       token: env("PSA_API_TOKEN").trim().replace(/^bearer\s+/i, ""),

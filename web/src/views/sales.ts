@@ -88,7 +88,7 @@ export async function salesView(_p: Record<string, string>, query: URLSearchPara
     viewSeg.querySelectorAll("button").forEach((b, i) => b.classList.toggle("active", (i === 0) === (view === "list")));
     list.className = view === "list" ? "sales-list" : "sales-grid";
     clear(list);
-    if (!items.length) { list.appendChild(empty(tr("Keine Verkäufe gefunden"), f.q || f.grader || f.set || f.card || f.type || f.source ? tr("Mit diesen Filtern gibt es noch keinen erfassten Verkauf.") : tr("Hier erscheinen echte Verkäufe mit Note bzw. Zustand, Verkaufsart (Auktion / Sofortkauf / Preisvorschlag), Marktplatz und Preis – eBay-Verkäufe laufen ein, sobald eBay den Zugang zu Verkaufsdaten freigeschaltet hat; Community-Meldungen landen sofort hier."))); return; }
+    if (!items.length) { list.appendChild(empty(tr("Keine Verkäufe gefunden"), f.q || f.grader || f.set || f.card || f.type || f.source ? tr("Mit diesen Filtern gibt es noch keinen erfassten Verkauf.") : tr("Hier erscheinen echte Verkäufe mit Note bzw. Zustand, Verkaufsart (Auktion / Sofortkauf / Preisvorschlag), Marktplatz und Preis – eBay.de und eBay.com, deutsche, englische und japanische Karten, bis zu drei Jahre zurück; Community-Meldungen landen sofort hier."))); return; }
     list.append(...items.map((s) => (view === "list" ? saleRow(s, { showCard: !f.card }) : saleCard(s))));
   }
 
