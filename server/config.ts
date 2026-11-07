@@ -40,7 +40,8 @@ export function buildConfig(e: EnvMap) {
       clientSecret: env("EBAY_CLIENT_SECRET"),
       marketplace: env("EBAY_MARKETPLACE", "EBAY_DE"),
       env: env("EBAY_ENV", "production") as "production" | "sandbox",
-      insightsEnabled: e.EBAY_INSIGHTS_ENABLED == null ? null : bool(e.EBAY_INSIGHTS_ENABLED, true),
+      /** null = unknown (probe the Marketplace Insights scope); an empty variable counts as unset, not as "off" */
+      insightsEnabled: !e.EBAY_INSIGHTS_ENABLED?.trim() ? null : bool(e.EBAY_INSIGHTS_ENABLED, true),
       maxCardsPerRun: Number(env("EBAY_MAX_CARDS_PER_RUN", "700")),
     },
     psa: {
