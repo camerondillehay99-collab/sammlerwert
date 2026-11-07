@@ -1,4 +1,8 @@
-import type { AuthResponse, CardDetail, CardSummary, CatalogFacets, Collection, CollectionItem, PortfolioSummary, SaleFeedItem, ScanResultPublic, SetSummary, User } from "../../../shared/types.ts";
+import type { AuthResponse, CardDetail, CardSummary, CatalogFacets, Collection, CollectionItem, Population, PortfolioSummary, SaleFeedItem, ScanResultPublic, SetSummary, User } from "../../../shared/types.ts";
+
+export interface SalesFeedQuery { q?: string | null; grader?: string | null; grade?: string | null; condition?: string | null; set?: string | null; card?: string | null; lang?: string | null; graded?: "1" | "0" | null; min?: string | null; type?: string | null; source?: string | null; sort?: "date" | "price" | null; dir?: "asc" | "desc" | null; limit?: number; offset?: number }
+/** Value of the filtered sales (one card): newest sale and 180-day median. */
+export interface SalesFeedSummary { last: number | null; lastAt: string | null; median: number | null; n180: number }
 
 export class HttpError extends Error { constructor(public status: number, message: string, public code?: string) { super(message); } }
 
@@ -78,11 +82,13 @@ export const api = {
   },
   facets: () => cached<CatalogFacets>("/api/catalog/facets", 3_600_000),
   snapshot: (id: string) => cached<unknown>(`/api/cards/${encodeURIComponent(id)}/snapshot`, 300_000),
-  salesFeed: (opts: { grader?: string | null; grade?: string | null; condition?: string | null; set?: string | null; graded?: "1" | "0" | null; min?: string | null; type?: string | null; source?: string | null; limit?: number; offset?: number } = {}) => {
+  salesFeed: (opts: SalesFeedQuery = {}) => {
     const p = new URLSearchParams();
     for (const [k, v] of Object.entries(opts)) if (v != null && v !== "") p.set(k, String(v));
-    return cached<{ items: SaleFeedItem[]; total: number }>(`/api/market/sales?${p}`, 60_000);
+    return cached<{ items: SaleFeedItem[]; total: number; summary: SalesFeedSummary | null }>(`/api/market/sales?${p}`, 60_000);
   },
+  population: (id: string) => call<{ items: Population[] }>("GET", `/api/cards/${encodeURIComponent(id)}/population`),
+  requestPopulation: (id: string, cert?: string) => call<{ items: Population[]; refreshed: boolean }>("POST", `/api/cards/${encodeURIComponent(id)}/population`, cert ? { cert } : {}),
   sets: () => cached<{ items: SetSummary[] }>("/api/sets", 300_000),
   set: (id: string, sort = "number") => cached<{ set: SetSummary; cards: CardSummary[] }>(`/api/sets/${encodeURIComponent(id)}?sort=${sort}`, 120_000),
   card: (id: string) => cached<CardDetail>(`/api/cards/${encodeURIComponent(id)}`, 20_000),

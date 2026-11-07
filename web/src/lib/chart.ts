@@ -10,33 +10,44 @@ function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, 
   return e;
 }
 
-export interface Series { name: string; points: PricePoint[]; color: string; dashed?: boolean; /** scatter instead of a line (e.g. single sales) */ dots?: boolean }
+export interface Series {
+  name: string; points: PricePoint[]; color: string; dashed?: boolean;
+  /** scatter instead of a line (e.g. single sales) */ dots?: boolean;
+  /** draw a marker on every point of a line (sales line) */ markers?: boolean;
+  /** marker shape for dot series (square = the viewer's own purchase) */ shape?: "circle" | "square";
+  /** connect points across holes longer than GAP_DAYS (sales are sparse by nature) */ bridge?: boolean;
+  /** leave this series out of the shaded area */ noArea?: boolean;
+}
 
 /** Longest hole (days) a line bridges before it is split into segments. */
 const GAP_DAYS = 45;
 
-export function lineChart(series: Series[], opts: { height?: number; formatY?: (n: number) => string; emptyText?: string; minDate?: string } = {}): SVGSVGElement {
+export function lineChart(series: Series[], opts: { height?: number; formatY?: (n: number) => string; emptyText?: string; minDate?: string; scale?: "linear" | "log" } = {}): SVGSVGElement {
   const W = 640, H = opts.height ?? 240, padL = 56, padR = 12, padT = 12, padB = 28;
   const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img" });
   if (opts.minDate) series = series.map((s) => ({ ...s, points: s.points.filter((p) => p.date >= opts.minDate!) }));
   const all = series.flatMap((s) => s.points);
-  if (all.length < 2 || new Set(all.map((p) => p.date)).size < 2) {
+  // A single sale (or several on one day) still deserves a chart when a reference line exists; otherwise show the empty text.
+  if (all.length < 1 || (all.length < 2 && !series.some((s) => s.dots || s.markers))) {
     const t = el("text", { x: W / 2, y: H / 2, "text-anchor": "middle", class: "chart-empty" });
     t.textContent = opts.emptyText ?? tr("Noch zu wenige Datenpunkte – die Historie wächst täglich.");
     svg.appendChild(t);
     return svg;
   }
   const xs = all.map((p) => new Date(p.date).getTime()), ys = all.map((p) => p.value);
-  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  let x0 = Math.min(...xs), x1 = Math.max(...xs);
+  if (x1 - x0 < 86_400_000) { x0 -= 3 * 86_400_000; x1 += 3 * 86_400_000; }
   let y0 = Math.min(...ys), y1 = Math.max(...ys);
   if (y0 === y1) { y0 *= 0.9; y1 *= 1.1; }
-  const yPad = (y1 - y0) * 0.1; y0 = Math.max(0, y0 - yPad); y1 += yPad;
+  const log = opts.scale === "log" && y0 > 0;
+  const T = (v: number) => (log ? Math.log(Math.max(v, 1e-6)) : v);
+  const yPad = (y1 - y0) * 0.1; y0 = Math.max(log ? y0 * 0.85 : 0, y0 - yPad); y1 += yPad;
   const X = (t: number) => padL + ((t - x0) / Math.max(1, x1 - x0)) * (W - padL - padR);
-  const Y = (v: number) => padT + (1 - (v - y0) / (y1 - y0)) * (H - padT - padB);
+  const Y = (v: number) => padT + (1 - (T(v) - T(y0)) / (T(y1) - T(y0))) * (H - padT - padB);
   const fy = opts.formatY ?? ((n: number) => n.toFixed(0));
 
   for (let i = 0; i <= 4; i++) {
-    const v = y0 + ((y1 - y0) * i) / 4, y = Y(v);
+    const v = log ? Math.exp(T(y0) + ((T(y1) - T(y0)) * i) / 4) : y0 + ((y1 - y0) * i) / 4, y = Y(v);
     svg.appendChild(el("line", { x1: padL, x2: W - padR, y1: y, y2: y, class: "chart-grid" }));
     const t = el("text", { x: padL - 8, y: y + 4, "text-anchor": "end", class: "chart-label" }); t.textContent = fy(v); svg.appendChild(t);
   }
@@ -53,22 +64,27 @@ export function lineChart(series: Series[], opts: { height?: number; formatY?: (
     if (pts.length < 1) return;
     for (const p of pts) hover.push({ x: X(new Date(p.date).getTime()), y: Y(p.value), date: p.date, value: p.value, series: s.name, color: s.color });
     if (s.dots) {
-      for (const p of pts) svg.appendChild(el("circle", { cx: X(new Date(p.date).getTime()), cy: Y(p.value), r: 3.2, fill: s.color, opacity: 0.85, class: "chart-sale" }));
+      for (const p of pts) {
+        const cx = X(new Date(p.date).getTime()), cy = Y(p.value);
+        svg.appendChild(s.shape === "square" ? el("rect", { x: cx - 4.5, y: cy - 4.5, width: 9, height: 9, fill: s.color, class: "chart-mark" }) : el("circle", { cx, cy, r: 3.2, fill: s.color, opacity: 0.85, class: "chart-sale" }));
+      }
       return;
     }
     // Break the line where the data has a hole longer than GAP_DAYS (history still importing, delisted product) instead of
-    // drawing a misleading straight bridge; the area fill follows the same segments.
-    const d = pts.map((p, i) => `${i && new Date(p.date).getTime() - new Date(pts[i - 1]!.date).getTime() <= GAP_DAYS * 86_400_000 ? "L" : "M"}${X(new Date(p.date).getTime()).toFixed(1)},${Y(p.value).toFixed(1)}`).join(" ");
-    if (!areaDone && pts.length > 1) {
+    // drawing a misleading straight bridge; the area fill follows the same segments. Sales lines bridge on purpose.
+    const gapMs = (s.bridge ? Number.POSITIVE_INFINITY : GAP_DAYS) * 86_400_000;
+    const d = pts.map((p, i) => `${i && new Date(p.date).getTime() - new Date(pts[i - 1]!.date).getTime() <= gapMs ? "L" : "M"}${X(new Date(p.date).getTime()).toFixed(1)},${Y(p.value).toFixed(1)}`).join(" ");
+    if (!areaDone && !s.noArea && pts.length > 1) {
       areaDone = true;
       const segs = d.split(" M").map((seg, i) => (i ? "M" : "") + seg).filter((seg) => seg.includes("L"));
       const area = el("path", { d: segs.map((seg) => { const m = seg.match(/^M([\d.]+),[\d.]+(?:.*L([\d.]+),[\d.]+)$/); return m ? `${seg} L${m[2]},${Y(y0)} L${m[1]},${Y(y0)} Z` : ""; }).join(" "), fill: s.color, opacity: 0.08 });
       svg.appendChild(area);
     }
     // Points without a neighbour inside GAP_DAYS would vanish from a split line – draw them as dots.
-    const near = (a: PricePoint, b: PricePoint | undefined) => !!b && Math.abs(new Date(a.date).getTime() - new Date(b.date).getTime()) <= GAP_DAYS * 86_400_000;
+    const near = (a: PricePoint, b: PricePoint | undefined) => !!b && Math.abs(new Date(a.date).getTime() - new Date(b.date).getTime()) <= gapMs;
     pts.forEach((p, i) => { if (!near(p, pts[i - 1]) && !near(p, pts[i + 1])) svg.appendChild(el("circle", { cx: X(new Date(p.date).getTime()), cy: Y(p.value), r: 2.6, fill: s.color })); });
     svg.appendChild(el("path", { d, fill: "none", stroke: s.color, "stroke-width": 2.2, "stroke-dasharray": s.dashed ? "5 5" : "", "stroke-linejoin": "round", "stroke-linecap": "round" }));
+    if (s.markers) for (const p of pts) svg.appendChild(el("circle", { cx: X(new Date(p.date).getTime()), cy: Y(p.value), r: 3, fill: s.color, class: "chart-sale" }));
     const last = pts[pts.length - 1]!;
     svg.appendChild(el("circle", { cx: X(new Date(last.date).getTime()), cy: Y(last.value), r: 3.5, fill: s.color }));
     if (pts.length === 1) svg.appendChild(el("circle", { cx: X(new Date(last.date).getTime()), cy: Y(last.value), r: 6, fill: s.color, opacity: 0.25 }));

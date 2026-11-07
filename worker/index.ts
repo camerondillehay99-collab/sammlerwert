@@ -10,6 +10,7 @@ import { runJob } from "../server/jobs/scheduler.ts";
 import { r2Store, useBlobStore, type R2BucketLike } from "../server/storage.ts";
 import { useScanProvider, workersAiProvider } from "../server/scan.ts";
 import { useTextAi, warmTranslations } from "../server/i18n.ts";
+import { refreshPsaPopulations } from "../server/services/population.ts";
 
 export interface Env {
   DB: D1DatabaseLike;
@@ -55,10 +56,16 @@ export default {
     return res;
   },
 
-  /** Data jobs run in GitHub Actions (nightly.yml). The Worker cron only warms UI translations (needs the AI binding). */
+  /**
+   * Data jobs run in GitHub Actions (nightly.yml). The Worker cron only does what needs its own bindings: warming UI
+   * translations (AI binding) and refreshing PSA population reports (PSA token lives here as a Worker secret).
+   */
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     const db = setup(env);
-    if (event.cron === "23 3 * * *") { ctx.waitUntil(warmTranslations(db, console.log).catch((e) => console.error(e))); return; }
+    if (event.cron === "23 3 * * *") {
+      ctx.waitUntil(Promise.allSettled([warmTranslations(db, console.log), refreshPsaPopulations(db, 60, console.log)]).then((r) => r.forEach((x) => x.status === "rejected" && console.error(x.reason))));
+      return;
+    }
     ctx.waitUntil(runJob(db, event.cron === "*/10 * * * *" ? "catalog_completion" : "daily_refresh").catch((e) => console.error(e)));
   },
 };

@@ -174,6 +174,28 @@ describe("API", () => {
     expect((await db.first<{ n: number }>("SELECT n FROM language_factors WHERE set_id = 'sv03.5' AND language = 'de'"))).toBeNull();
     expect((await call("POST", "/api/cards/sv03.5-199/sales", { priceEur: -5 })).status).toBe(400);
   });
+  test("sales page: title search, sort, card filter with value summary; population report", async () => {
+    const d = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+    await call("POST", "/api/cards/sv03.5-199/sales", { priceEur: 150, soldAt: d(3), language: "de", gradingCompany: "PSA", grade: 10, marketplace: "ebay", listingType: "fixed_price", title: "Glurak ex 199/165 PSA 10 GEM MINT" });
+    await call("POST", "/api/cards/sv03.5-199/sales", { priceEur: 130, soldAt: d(20), language: "de", gradingCompany: "PSA", grade: 10, marketplace: "ebay", listingType: "auction", title: "Charizard ex SIR PSA 10" });
+    const byTitle = (await call("GET", "/api/market/sales?q=GEM%20MINT")).body;
+    expect(byTitle.total).toBe(1); expect(byTitle.items[0].priceEur).toBe(150);
+    const byPrice = (await call("GET", "/api/market/sales?sort=price&dir=asc")).body;
+    expect(byPrice.items.map((s: { priceEur: number }) => s.priceEur)).toEqual([120, 130, 150]);
+    expect(byPrice.summary).toBeNull();
+    const psa10 = (await call("GET", "/api/market/sales?card=sv03.5-199&grader=PSA&grade=10")).body;
+    expect(psa10.total).toBe(2); expect(psa10.summary).toEqual({ last: 150, lastAt: d(3), median: 140, n180: 2 });
+    const detail = (await call("GET", "/api/cards/sv03.5-199")).body;
+    expect(detail.populations).toEqual([]);
+    expect((await call("GET", "/api/cards/sv03.5-199/population")).body.items).toEqual([]);
+    // a known PSA spec → stored report → profile numbers
+    await db.run("INSERT INTO populations(card_id, company, spec_id, description, total, grades, fetched_at) VALUES ('sv03.5-199', 'PSA', '123', 'POKEMON SV 151 #199 CHARIZARD EX', 1000, '{\"10\":600,\"9\":300,\"8\":90,\"auth\":10}', ?)", [new Date().toISOString()]);
+    const pop = (await call("GET", "/api/cards/sv03.5-199")).body.populations[0];
+    expect(pop.company).toBe("PSA"); expect(pop.total).toBe(1000); expect(pop.gems).toBe(600); expect(pop.gemRate).toBeCloseTo(0.6); expect(pop.grades[0]).toEqual(["10", 600]); expect(pop.grades.at(-1)).toEqual(["auth", 10]);
+    // refresh is throttled to once a day – no PSA call needed when fresh
+    const again = await call("POST", "/api/cards/sv03.5-199/population", {});
+    expect(again.status).toBe(200); expect(again.body.refreshed).toBe(false);
+  });
   test("watchlist & export gating", async () => {
     expect((await call("POST", "/api/watchlist", { cardId: "sv03.5-199" })).status).toBe(201);
     expect((await call("GET", "/api/watchlist")).body.items.length).toBe(1);

@@ -7,6 +7,7 @@ import type { SqlDb } from "./db/adapter.ts";
 import { config } from "./config.ts";
 import { nowIso } from "./db/index.ts";
 import { findCandidates, type ScanCandidate, type ScanFacts } from "./scan.ts";
+import { populationFromCert } from "./services/population.ts";
 
 export interface PsaCert {
   certNo: string; specId: number | null; year: string | null; brand: string | null; category: string | null; cardNumber: string | null; subject: string | null;
@@ -74,6 +75,10 @@ export async function resolveCert(db: SqlDb, certRaw: string): Promise<{ cert: P
   if (!cert) return { cert: null, facts: null, candidates: [] };
   const facts = certToFacts(cert);
   const candidates = await findCandidates(db, facts, 5, { setWeight: 3 });
-  if (candidates[0]) await db.run("UPDATE psa_certs SET card_id = ? WHERE cert_no = ?", [candidates[0].card.id, cert.certNo]).catch(() => {});
+  if (candidates[0]) {
+    await db.run("UPDATE psa_certs SET card_id = ? WHERE cert_no = ?", [candidates[0].card.id, cert.certNo]).catch(() => {});
+    // A known spec unlocks the population report for the card – fetch it once, best effort.
+    await populationFromCert(db, candidates[0].card.id, cert.specId).catch(() => {});
+  }
   return { cert, facts, candidates };
 }

@@ -5,6 +5,7 @@ import type { CardDetail, CardSummary, CardmarketGuidePoint, Language, LastSale,
 import { jsonOr } from "../db/index.ts";
 import { cardHistory, quoteCards, type CardForQuote, type QuoteMap } from "../pricing/quotes.ts";
 import { cardSeries, snapshotFrom, type Snapshot } from "../pricing/history.ts";
+import { getPopulations } from "./population.ts";
 
 /**
  * List query: joins today's guide row (for SQL-side sorting by value/trend) and the German language factor.
@@ -122,12 +123,12 @@ export async function getCardDetail(db: SqlDb, id: string): Promise<CardDetail |
   const [rows, extras, saleRows] = await readMany(db, [
     stmt(`${CARD_SELECT} WHERE c.id = ?`, id),
     stmt("SELECT hp, types, dex_ids, illustrator, cm_match_method, cm_match_confidence, tcgp_product_id FROM cards WHERE id = ?", id),
-    stmt("SELECT * FROM sales WHERE card_id = ? ORDER BY sold_at DESC LIMIT 100", id),
+    stmt("SELECT * FROM sales WHERE card_id = ? ORDER BY sold_at DESC, id DESC LIMIT 400", id),
   ]);
   const row = rows[0] as unknown as CardRow | undefined;
   if (!row) return null;
   const extra = extras[0] as unknown as { hp: number | null; types: string | null; dex_ids: string | null; illustrator: string | null; cm_match_method: string | null; cm_match_confidence: number | null; tcgp_product_id: number | null };
-  const [{ quotes, guideByProduct }, series] = await Promise.all([quoteCards(db, [row]), cardSeries(db, row)]);
+  const [{ quotes, guideByProduct }, series, populations] = await Promise.all([quoteCards(db, [row]), cardSeries(db, row), getPopulations(db, id)]);
   const prices: PriceQuote[] = [...new Map([...quotes].filter(([k]) => !k.endsWith("|*")).map(([k, q]) => [k, q])).values()].sort((a, b) => a.language.localeCompare(b.language) || a.variant.localeCompare(b.variant));
   const g = row.cm_product_id != null ? guideByProduct.get(row.cm_product_id) : undefined;
   const guide: CardmarketGuidePoint | null = g ? { date: g.date, avg: g.avg, low: g.low, trend: g.trend, avg1: g.avg1, avg7: g.avg7, avg30: g.avg30,
@@ -142,7 +143,7 @@ export async function getCardDetail(db: SqlDb, id: string): Promise<CardDetail |
     hp: extra.hp, types: jsonOr(extra.types, []), dexIds: jsonOr(extra.dex_ids, []), illustrator: extra.illustrator, variants: jsonOr(row.variants, {}),
     cmProductId: row.cm_product_id, cmMatchMethod: extra.cm_match_method, cmMatchConfidence: extra.cm_match_confidence, tcgpProductId: extra.tcgp_product_id ?? null,
     cmUrl: row.cm_product_id != null ? cardmarketSearchUrl(base.nameEn ?? base.nameDe ?? "") : null,
-    prices, guide, history: await cardHistory(db, row), series, sales, graded, conditions,
+    prices, guide, history: await cardHistory(db, row), series, sales, graded, conditions, populations,
   };
 }
 
@@ -212,26 +213,54 @@ export async function catalogFacets(db: SqlDb): Promise<{ rarities: Array<{ valu
   });
 }
 
-/** Market feed: the newest sales across the catalogue with their cards; filters by grader/grade/condition/set/source. */
-export async function recentSales(db: SqlDb, opts: { grader?: string | null; grade?: number | null; condition?: string | null; setId?: string | null; source?: string | null; listingType?: string | null; graded?: boolean | null; minPrice?: number | null; limit?: number; offset?: number } = {}): Promise<{ items: Array<SaleRecord & { card: CardSummary }>; total: number }> {
+export interface SalesFeedOptions {
+  grader?: string | null; grade?: number | null; condition?: string | null; setId?: string | null; cardId?: string | null; language?: string | null;
+  source?: string | null; listingType?: string | null; graded?: boolean | null; minPrice?: number | null;
+  /** free text over listing titles and card names */
+  q?: string | null;
+  sort?: "date" | "price" | null; dir?: "asc" | "desc" | null; limit?: number; offset?: number;
+}
+/** Value of the filtered sales (Card-Ladder-style "value" for a card + grade): newest sale and the 180-day median. */
+export interface SalesFeedSummary { last: number | null; lastAt: string | null; median: number | null; n180: number }
+
+/**
+ * Sales page / market feed: every recorded sale across the catalogue with its card. Filters by grader, grade, condition,
+ * set, card, language, marketplace, sale type and price; searchable by listing title; sortable by date or price.
+ */
+export async function recentSales(db: SqlDb, opts: SalesFeedOptions = {}): Promise<{ items: Array<SaleRecord & { card: CardSummary }>; total: number; summary: SalesFeedSummary | null }> {
   const where: string[] = [], params: (string | number)[] = [];
   if (opts.grader) { where.push("s.grading_company = ?"); params.push(opts.grader); }
   if (opts.grade != null) { where.push("s.grade = ?"); params.push(opts.grade); }
   if (opts.condition) { where.push("s.condition = ?"); params.push(opts.condition); }
   if (opts.setId) { where.push("c.set_id = ?"); params.push(opts.setId); }
+  if (opts.cardId) { where.push("s.card_id = ?"); params.push(opts.cardId); }
+  if (opts.language) { where.push("s.language = ?"); params.push(opts.language); }
   if (opts.source) { where.push("s.source = ?"); params.push(opts.source); }
   if (opts.listingType) { where.push("s.listing_type = ?"); params.push(opts.listingType); }
   if (opts.graded === true) where.push("s.grading_company IS NOT NULL"); else if (opts.graded === false) where.push("s.grading_company IS NULL");
   if (opts.minPrice != null) { where.push("s.price_eur >= ?"); params.push(opts.minPrice); }
+  const q = opts.q?.trim().slice(0, 80);
+  if (q) { const like = `%${q.replace(/[%_]/g, "")}%`; where.push("(s.title LIKE ? OR c.name_de LIKE ? OR c.name_en LIKE ?)"); params.push(like, like, like); }
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const dir = opts.dir === "asc" ? "ASC" : "DESC";
+  const order = opts.sort === "price" ? `s.price_eur ${dir}, s.sold_at DESC` : `s.sold_at ${dir}, s.id ${dir}`;
   const limit = Math.min(opts.limit ?? 50, 200), offset = opts.offset ?? 0;
-  const [rows, totals] = await readMany(db, [
-    stmt(`SELECT s.* FROM sales s JOIN cards c ON c.id = s.card_id ${whereSql} ORDER BY s.sold_at DESC, s.id DESC LIMIT ? OFFSET ?`, ...params, limit, offset),
+  const since = new Date(Date.now() - 180 * 86_400_000).toISOString().slice(0, 10);
+  const [rows, totals, recent] = await readMany(db, [
+    stmt(`SELECT s.* FROM sales s JOIN cards c ON c.id = s.card_id ${whereSql} ORDER BY ${order} LIMIT ? OFFSET ?`, ...params, limit, offset),
     stmt(`SELECT COUNT(*) n FROM sales s JOIN cards c ON c.id = s.card_id ${whereSql}`, ...params),
-  ]) as unknown as [SaleRow[], { n: number }[]];
+    // Value for a filtered card: the sales of the last 180 days, newest first (only meaningful for one card).
+    opts.cardId ? stmt(`SELECT s.price_eur, s.sold_at FROM sales s JOIN cards c ON c.id = s.card_id ${whereSql} AND s.sold_at >= ? ORDER BY s.sold_at DESC, s.id DESC LIMIT 200`, ...params, since) : stmt("SELECT 0 WHERE 0"),
+  ]) as unknown as [SaleRow[], { n: number }[], Array<{ price_eur: number; sold_at: string }>];
   const cards = await getCardSummaries(db, rows.map((r) => r.card_id));
   const items = rows.filter((r) => cards.has(r.card_id)).map((r) => ({ ...saleToRecord(r), card: cards.get(r.card_id)! }));
-  return { items, total: totals[0]?.n ?? 0 };
+  let summary: SalesFeedSummary | null = null;
+  if (opts.cardId) {
+    const prices = recent.map((r) => r.price_eur).sort((a, b) => a - b);
+    const med = prices.length ? (prices.length % 2 ? prices[(prices.length - 1) / 2]! : (prices[prices.length / 2 - 1]! + prices[prices.length / 2]!) / 2) : null;
+    summary = { last: recent[0]?.price_eur ?? null, lastAt: recent[0]?.sold_at ?? null, median: prices.length >= 2 ? med : null, n180: prices.length };
+  }
+  return { items, total: totals[0]?.n ?? 0, summary };
 }
 
 export async function catalogStats(db: SqlDb) {

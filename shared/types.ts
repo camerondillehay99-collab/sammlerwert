@@ -100,6 +100,8 @@ export interface CardDetail extends CardSummary {
   graded: GradedValue[];
   /** comps per condition NM → DMG – only from real raw sales, never estimated */
   conditions: ConditionValue[];
+  /** population reports (PSA live via API; others when imported) */
+  populations: Population[];
 }
 
 export interface GradedValue {
@@ -143,6 +145,21 @@ export interface ConditionValue {
   n: number;                                    // sales in that bucket (180 days)
   lastSoldAt: string | null; lastListingType: ListingType | null; lastSource: SaleSource | null; lastUrl: string | null;
   method: "sales" | "none";
+}
+
+/** Population report of one grading company for a card (Card-Ladder-style profile numbers). */
+export interface Population {
+  company: "PSA" | "CGC" | "BGS" | "SGC" | "TAG";
+  specId: string | null;
+  description: string | null;
+  total: number;
+  /** gem mint count (PSA 10 / CGC 10 / BGS 10 …) */
+  gems: number;
+  /** gems / total */
+  gemRate: number | null;
+  /** count per grade, highest first: [["10", n], ["9.5", n], …]; "auth" = authentic / altered, "q" = qualifiers */
+  grades: Array<[grade: string, count: number]>;
+  fetchedAt: string;
 }
 
 export interface SaleRecord {

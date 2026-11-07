@@ -23,6 +23,7 @@ import { catalogStats } from "../server/services/catalog.ts";
 import { TCGCSV_FIRST_ARCHIVE, matchCardsToTcgplayer, refreshTcgplayerDaily } from "../server/ingest/tcgplayer.ts";
 import { ensureFx } from "../server/ingest/fx.ts";
 import { runTcgpBackfill } from "./tcgp-backfill.ts";
+import { refreshPsaPopulations } from "../server/services/population.ts";
 
 const log = (m: string) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${m}`);
 const env = process.env;
@@ -34,7 +35,7 @@ if (!accountId || !apiToken || !databaseId) { console.error("CLOUDFLARE_ACCOUNT_
 applyEnv({ ...env, INGEST_DELAY_MS: env.INGEST_DELAY_MS ?? "40", CATALOG_COMPLETION_BATCH: env.DETAIL_BATCH ?? "2500" });
 const db = new D1HttpDb({ accountId, databaseId, apiToken });
 // An empty workflow input arrives as "" on scheduled runs – fall back to the full default list then.
-const DEFAULT_STEPS = "details,catalog,guide,tcgp,fx,ebay,factors,tcgp_backfill";
+const DEFAULT_STEPS = "details,catalog,guide,tcgp,fx,ebay,factors,pops,tcgp_backfill";
 const steps = new Set((env.STEPS?.trim() || DEFAULT_STEPS).split(",").map((s) => s.trim()).filter(Boolean));
 const weekday = new Date().getUTCDay();
 const t0 = Date.now();
@@ -76,6 +77,7 @@ CREATE TABLE IF NOT EXISTS deploy_patches (id INTEGER PRIMARY KEY AUTOINCREMENT,
   if (steps.has("fx")) log(`Wechselkurse USD→EUR: ${await ensureFx(db, TCGCSV_FIRST_ARCHIVE)} Tage`);
   if (steps.has("ebay") && ebayConfigured()) log(`eBay: ${JSON.stringify(await runEbayIngest(db, undefined, log))}`);
   if (steps.has("factors")) log(`Sprachfaktoren: ${JSON.stringify(await recomputeFactors(db))}`);
+  if (steps.has("pops")) log(`PSA-Populationen: ${JSON.stringify(await refreshPsaPopulations(db, Number(env.PSA_POP_BUDGET ?? "60"), log))}`);
   if (steps.has("tcgp_backfill")) {
     // Resumable: as many archive days as fit into the remaining budget (workflow timeout is 45 min), cursor in meta.
     const minutes = Number(env.BACKFILL_MINUTES ?? "0") || Math.max(5, 38 - (Date.now() - t0) / 60_000);

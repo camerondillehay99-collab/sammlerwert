@@ -12,83 +12,22 @@ import { tr, UI_LANGUAGES, getLang, setLang, getEdition, setEdition } from "../l
 
 export async function market(_p: Record<string, string>, query: URLSearchParams): Promise<HTMLElement> {
   const lang = (query.get("lang") === "en" || query.get("lang") === "de" ? query.get("lang") : getEdition()) as "de" | "en";
-  const tab = query.get("tab") === "sales" ? "sales" : "movers";
-  const [m, hlt, sets] = await Promise.all([api.movers(lang), api.health(), api.sets().then((r) => r.items).catch(() => [] as SetSummary[])]);
+  // The sales feed grew into its own page (/verkaeufe); old links keep working.
+  if (query.get("tab") === "sales") { const p = new URLSearchParams(query); p.delete("tab"); navigate(`/verkaeufe${p.size ? `?${p}` : ""}`, true); return h("div"); }
+  const [m, hlt] = await Promise.all([api.movers(lang), api.health()]);
   const edition = h("a", { class: "chip ghost", href: "/einstellungen", title: tr("Standard-Edition in den Einstellungen ändern") }, lang === "de" ? tr("Deutsche Karten") : tr("Englische Karten"));
   const tabs = h("div", { class: "seg", role: "tablist" },
-    h("a", { class: tab === "movers" ? "active" : "", role: "tab", href: `/markt${lang !== getEdition() ? `?lang=${lang}` : ""}` }, tr("Bewegungen")),
-    h("a", { class: tab === "sales" ? "active" : "", role: "tab", href: `/markt?tab=sales` }, tr("Verkäufe")));
+    h("a", { class: "active", role: "tab", href: `/markt${lang !== getEdition() ? `?lang=${lang}` : ""}` }, tr("Bewegungen")),
+    h("a", { class: "", role: "tab", href: "/verkaeufe" }, tr("Verkäufe")));
   const page = h("div", { class: "page" },
-    h("header", { class: "page-head" }, h("div", null, h("p", { class: "eyebrow" }, tr("Markt")), h("h1", null, tab === "sales" ? tr("Letzte Verkäufe") : tr("Bewegungen der letzten 30 Tage"))), h("div", { class: "head-actions" }, hoverToggle(), edition)),
+    h("header", { class: "page-head" }, h("div", null, h("p", { class: "eyebrow" }, tr("Markt")), h("h1", null, tr("Bewegungen der letzten 30 Tage"))), h("div", { class: "head-actions" }, hoverToggle(), edition)),
     tabs);
-  if (tab === "sales") { page.append(salesFeed(sets, query)); return page; }
   page.append(
     h("p", { class: "muted" }, tr("Datenstand Cardmarket-Preisguide: {hltstatsguid} · {fmtintNumber} bewertete Karten-Varianten · Trends basieren bis zum Aufbau der eigenen Historie auf Cardmarkts 30-Tage-Durchschnitt.", { hltstatsguid: hlt.stats.guideDate ? fmt.date(String(hlt.stats.guideDate)) : "–", fmtintNumber: fmt.int(Number(hlt.stats.quotes)) })),
     section(tr("Aufsteiger"), m.up.length ? h("div", { class: "tiles" }, ...m.up.map((x) => cardTile(x.card, { value: x.value, trend: x.trend, sale: false }))) : empty(tr("Noch keine Daten"), tr("Trends erscheinen, sobald Preishistorie vorliegt."))),
     section(tr("Absteiger"), m.down.length ? h("div", { class: "tiles" }, ...m.down.map((x) => cardTile(x.card, { value: x.value, trend: x.trend, sale: false }))) : empty(tr("Noch keine Daten"), "")),
   );
   return page;
-}
-
-const GRADERS = ["PSA", "BGS", "CGC", "TAG"];
-const GRADES: Record<string, string[]> = { PSA: ["10", "9", "8", "7"], BGS: ["10", "9.5", "9", "8.5"], CGC: ["10", "9.5", "9", "8"], TAG: ["10", "9.5", "9"] };
-
-/** Gempire-style sold feed: every recorded sale with grader/grade or condition chips, filterable. */
-function salesFeed(sets: SetSummary[], query: URLSearchParams): HTMLElement {
-  const f = { grader: query.get("grader") ?? "", grade: query.get("grade") ?? "", set: query.get("set") ?? "", graded: (query.get("graded") ?? "") as "" | "1" | "0", min: query.get("min") ?? "", type: query.get("type") ?? "", source: query.get("source") ?? "" };
-  const root = h("div", { class: "feed" });
-  const list = h("div", { class: "sales-list" });
-  const meta = h("p", { class: "muted result-meta" });
-  const more = h("button", { class: "btn ghost", hidden: true }, tr("Mehr laden"));
-  const bar = h("div", { class: "feed-filters" });
-  let offset = 0, total = 0;
-  const sync = () => { const p = new URLSearchParams({ tab: "sales" }); for (const [k, v] of Object.entries(f)) if (v) p.set(k, v); history.replaceState(null, "", `/markt?${p}`); };
-  function filters() {
-    const kind = h("div", { class: "chips" },
-      h("button", { class: `chip ${!f.grader && !f.graded ? "" : "ghost"}`, onClick: () => { f.grader = ""; f.grade = ""; f.graded = ""; run(); } }, tr("Alle")),
-      h("button", { class: `chip ${f.graded === "0" ? "" : "ghost"}`, onClick: () => { f.grader = ""; f.grade = ""; f.graded = "0"; run(); } }, tr("Roh")),
-      ...GRADERS.map((g) => h("button", { class: `chip ${f.grader === g ? "" : "ghost"} grader-${g.toLowerCase()}`, onClick: () => { f.grader = g; f.graded = ""; f.grade = ""; run(); } }, g)));
-    const grades = f.grader ? h("div", { class: "chips" }, h("button", { class: `chip ${!f.grade ? "" : "ghost"}`, onClick: () => { f.grade = ""; run(); } }, tr("Alle Noten")), ...(GRADES[f.grader] ?? []).map((g) => h("button", { class: `chip ${f.grade === g ? "" : "ghost"}`, onClick: () => { f.grade = g; run(); } }, `${f.grader} ${g}`))) : null;
-    const setSel = h("select", { "aria-label": tr("Set") }, h("option", { value: "" }, tr("Alle Sets")), ...groupSets(sets)) as HTMLSelectElement; setSel.value = f.set;
-    setSel.addEventListener("change", () => { f.set = setSel.value; run(); });
-    const min = h("select", { "aria-label": tr("Mindestpreis") }, ...[["", tr("Jeder Preis")], ["10", "≥ 10 €"], ["50", "≥ 50 €"], ["200", "≥ 200 €"], ["1000", "≥ 1.000 €"]].map(([v, t]) => h("option", { value: v, selected: v === f.min }, t))) as HTMLSelectElement;
-    min.addEventListener("change", () => { f.min = min.value; run(); });
-    // Sale type and marketplace: auction results and Buy-It-Now comps are read differently.
-    const types = h("div", { class: "chips" },
-      ...[["", tr("Alle Verkaufsarten")], ["auction", tr("Auktion")], ["fixed_price", tr("Sofortkauf")], ["best_offer", tr("Preisvorschlag")]].map(([v, t]) => h("button", { class: `chip ${f.type === v ? "" : "ghost"} sale-${v || "all"}`, onClick: () => { f.type = v!; run(); } }, t)));
-    const src = h("select", { "aria-label": tr("Marktplatz") }, ...[["", tr("Alle Marktplätze")], ["ebay_de", "eBay.de"], ["ebay", "eBay"], ["fanatics", "Fanatics Collect"], ["heritage", "Heritage Auctions"], ["alt", "Alt"], ["cardmarket", "Cardmarket"], ["user", tr("Community")]].map(([v, t]) => h("option", { value: v, selected: v === f.source }, t))) as HTMLSelectElement;
-    src.addEventListener("change", () => { f.source = src.value; run(); });
-    bar.replaceChildren(kind, ...(grades ? [grades] : []), types, h("div", { class: "feed-selects" }, setSel, min, src));
-  }
-  async function run(append = false) {
-    sync(); filters();
-    if (!append) { offset = 0; clear(list); list.appendChild(spinner()); }
-    try {
-      const r = await api.salesFeed({ grader: f.grader || null, grade: f.grade || null, set: f.set || null, graded: f.graded || null, min: f.min || null, type: f.type || null, source: f.source || null, limit: 50, offset });
-      if (!append) clear(list);
-      total = r.total; offset += r.items.length;
-      if (!r.items.length && !append) list.appendChild(empty(tr("Noch keine Verkäufe erfasst"), tr("Hier erscheinen echte Verkäufe mit Note bzw. Zustand, Preis, Verkaufsart (Auktion / Sofortkauf) und Marktplatz – eBay-Verkäufe werden eingelesen, sobald der eBay-Zugang freigeschaltet ist; Community-Meldungen landen sofort hier.")));
-      list.append(...r.items.map(saleRow));
-      meta.textContent = total ? tr("{n} Verkäufe", { n: fmt.int(total) }) : "";
-      more.hidden = offset >= total;
-    } catch (e) { clear(list); list.appendChild(empty(tr("Fehler"), (e as Error).message)); }
-  }
-  more.addEventListener("click", () => run(true));
-  root.append(bar, meta, list, h("div", { class: "center" }, more));
-  run();
-  return root;
-}
-
-function saleRow(s: SaleFeedItem): HTMLElement {
-  const grade = s.gradingCompany ? h("span", { class: `chip grader-${s.gradingCompany.toLowerCase()}` }, `${s.gradingCompany} ${s.grade ?? ""}`) : h("span", { class: "chip ghost" }, s.condition ? label.condition(s.condition) : tr("Roh"));
-  const src = label.marketplace(s.source);
-  return h("div", { class: "sale" },
-    h("a", { class: "sale-img", href: `/karte/${encodeURIComponent(s.cardId)}` }, imgOr(cardImage(s.card), () => placeholder(s.card), { alt: cardName(s.card), width: 56, height: 78 })),
-    h("div", { class: "sale-body" }, h("a", { class: "sale-title", href: `/karte/${encodeURIComponent(s.cardId)}` }, h("strong", null, cardName(s.card))),
-      h("span", { class: "muted" }, `${s.card.setNameDe ?? s.card.setNameEn ?? ""} · #${s.card.localId} · ${label.language(s.language)} · ${label.variant(s.variant)}`),
-      h("div", { class: "chips" }, grade, saleBadge(s.listingType), s.verified ? h("span", { class: "chip ok", title: tr("verifiziert") }, "✓") : h("span", { class: "chip ghost", title: tr("von einem Nutzer gemeldet, noch nicht geprüft") }, tr("Community")))),
-    h("div", { class: "sale-value" }, h("b", null, fmt.eur(s.priceEur)), h("span", { class: "muted" }, fmt.date(s.soldAt)), s.url ? h("a", { class: "muted small", href: s.url, target: "_blank", rel: "noopener" }, src, " ", svg(icons.external, 11)) : h("span", { class: "muted small" }, src)),
-  );
 }
 
 export async function settings(_p: Record<string, string>, query: URLSearchParams): Promise<HTMLElement> {

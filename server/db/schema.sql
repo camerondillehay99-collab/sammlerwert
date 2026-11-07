@@ -279,6 +279,20 @@ CREATE TABLE IF NOT EXISTS psa_certs (
   card_id TEXT
 );
 
+-- Population reports per card and grading company. PSA via the public API (keyed by PSA's spec id, learned from any
+-- certificate of the card); other companies publish no API – rows for them arrive through imports only.
+CREATE TABLE IF NOT EXISTS populations (
+  card_id TEXT NOT NULL REFERENCES cards(id),
+  company TEXT NOT NULL,                 -- PSA | CGC | BGS | SGC | TAG
+  spec_id TEXT,                          -- grader's own id for this card (PSA SpecID)
+  description TEXT,                      -- grader's description of the spec
+  total INTEGER NOT NULL DEFAULT 0,
+  grades TEXT NOT NULL DEFAULT '{}',     -- JSON {"10": n, "9": n, "8.5": n, …, "auth": n, "q": n}
+  fetched_at TEXT NOT NULL,
+  PRIMARY KEY (card_id, company)
+);
+CREATE INDEX IF NOT EXISTS idx_populations_spec ON populations(company, spec_id);
+
 -- Machine-translated UI strings for languages beyond German/English (see server/i18n.ts)
 CREATE TABLE IF NOT EXISTS ui_translations (
   lang TEXT NOT NULL,

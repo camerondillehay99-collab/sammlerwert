@@ -612,3 +612,61 @@ button.chip { cursor: pointer; } .chip.active-chip { gap: 6px; }
 .snap-last { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; } .snap-last small { flex-basis: 100%; }
 .snap-value.ref { font-size: 18px; }
 .rung.none b, .rung.none small { color: var(--ink-2); }
+
+/* ---- Sales page & card page, Card-Ladder layout ---- */
+h1.big { font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.03em; text-transform: uppercase; }
+.sales-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.sales-bar .search-bar { flex: 1; min-width: 240px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--bg-el); }
+.sales-bar .search-bar svg { color: var(--c-muted); flex: none; } .sales-bar .search-input { flex: 1; border: 0; background: transparent; padding: 11px 0; font-size: 15px; min-width: 0; } .sales-bar .search-input:focus { outline: none; box-shadow: none; }
+.sort-box { display: flex; gap: 4px; align-items: center; }
+.sales-filters { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; background: var(--bg-el); border: 1px solid var(--line); border-radius: var(--r); }
+.fgroup { display: flex; flex-direction: column; gap: 8px; } .flabel { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--c-muted); }
+.fgroup.selects { flex-direction: row; flex-wrap: wrap; gap: 8px; } .fgroup.selects select { padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--bg-el); max-width: 260px; }
+.sales-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 14px; } .sales-meta > b { margin-right: 6px; }
+.sales-value { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; } .sales-value .sv-label { font-weight: 800; font-size: 20px; letter-spacing: -0.01em; } .sales-value > b { font-size: 24px; font-variant-numeric: tabular-nums; }
+.btn.small { padding: 6px 10px; font-size: 13px; }
+.chip.dim { opacity: .55; }
+/* sale row: image · source + title · date · type · price */
+.sale { grid-template-columns: 56px minmax(0, 1fr) auto; gap: 14px 18px; align-items: center; padding: 12px 14px; }
+.sale-cols { display: flex; gap: 18px; align-items: center; }
+.sale-body { gap: 3px; } .sale-src { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--c-muted); }
+.sale-title { font-size: 15px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sale-link { color: inherit; display: flex; gap: 6px; align-items: baseline; } .sale-link .sale-title { min-width: 0; } .sale-link:hover .sale-title { color: var(--c-brand); } .sale-link svg { color: var(--c-muted); vertical-align: middle; }
+.sale-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; margin-top: 2px; }
+.sale-col { display: flex; flex-direction: column; align-items: flex-end; min-width: 88px; } .sale-col .sale-k { font-size: 11px; color: var(--c-muted); font-weight: 600; } .sale-col b { font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sale-col.price b { font-size: 17px; }
+.sale-type.sale-auction { color: var(--c-violet); } .sale-type.sale-fixed_price { color: var(--c-up); } .sale-type.sale-best_offer { color: var(--c-blue); }
+.sales-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.sale-tile { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--bg-el); border: 1px solid var(--line); border-radius: var(--r); color: inherit; }
+.sale-tile:hover { border-color: var(--line-strong); box-shadow: var(--shadow); } .sale-tile-img { aspect-ratio: 63 / 88; display: grid; place-items: center; background: var(--bg-sub); border-radius: var(--r-sm); overflow: hidden; } .sale-tile-img img { width: 100%; height: 100%; object-fit: contain; }
+.sale-tile strong { font-size: 13px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sale-tile-foot { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; } .sale-tile-foot b { font-size: 15px; font-variant-numeric: tabular-nums; }
+/* card page */
+.profile-chips { margin-bottom: 4px; }
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.kpi { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; background: var(--bg-el); border: 1px solid var(--line); border-radius: var(--r-sm); min-width: 0; }
+.kpi .kpi-k { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--c-muted); display: flex; gap: 4px; align-items: center; }
+.kpi > b { font-size: 22px; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; line-height: 1.2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; } .kpi > b .badge { font-size: 11px; }
+.kpi.main { grid-column: span 2; border-top: 3px solid var(--c-up); } .kpi.main > b { font-size: 30px; } .kpi small { font-size: 12px; }
+.card-prices .comps-strip { margin-top: 0; }
+.sales-block { display: flex; flex-direction: column; gap: 14px; }
+.sales-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 18px; align-items: start; }
+.sales-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } .sales-stats.empty { opacity: .6; }
+.sstat { display: flex; flex-direction: column; gap: 1px; min-width: 0; } .sstat span { font-size: 11.5px; color: var(--c-muted); font-weight: 600; } .sstat b { font-size: 16px; font-variant-numeric: tabular-nums; } .sstat small { font-size: 11px; }
+.section-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; } .section-head .link { display: inline-flex; align-items: center; gap: 2px; font-weight: 600; }
+.invest-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.owned-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.owned-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 12px; align-items: center; padding: 8px 12px; background: var(--bg-sub); border-radius: var(--r-sm); font-size: 14px; } .owned-row b { font-variant-numeric: tabular-nums; }
+.profile-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
+.pop { display: flex; flex-direction: column; gap: 12px; }
+.pop-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; } .pop-kpi { display: flex; flex-direction: column; padding: 10px 12px; background: var(--bg-sub); border-radius: var(--r-sm); } .pop-kpi span { font-size: 11px; color: var(--c-muted); font-weight: 600; } .pop-kpi b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.pop-grades { display: flex; flex-direction: column; gap: 4px; }
+.pop-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) 64px 48px; gap: 8px; align-items: center; font-size: 13px; } .pop-row .pop-g { font-weight: 800; } .pop-row i { display: block; height: 10px; border-radius: 5px; background: var(--c-brand); opacity: .85; } .pop-row b { text-align: right; font-variant-numeric: tabular-nums; } .pop-row small { text-align: right; }
+.chart-mark { stroke: var(--bg-el); stroke-width: 1.5; }
+@media (max-width: 900px) { .sales-layout { grid-template-columns: 1fr; } .sales-stats { grid-template-columns: repeat(4, 1fr); } .profile-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) {
+  .sale { grid-template-columns: 48px minmax(0, 1fr); grid-template-areas: "img body" "cols cols"; row-gap: 8px; }
+  .sale .sale-img { grid-area: img; } .sale .sale-body { grid-area: body; } .sale .sale-cols { grid-area: cols; justify-content: space-between; gap: 10px; }
+  .sale .sale-col { min-width: 0; align-items: flex-start; } .sale .sale-col.price { align-items: flex-end; }
+  .sales-stats { grid-template-columns: repeat(2, 1fr); } .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .kpi.main { grid-column: span 2; } .kpi > b { font-size: 19px; } .sales-bar .search-bar { min-width: 100%; }
+}

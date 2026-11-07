@@ -6,6 +6,7 @@ import { state, subscribe, loadUser, setTheme, hydrateUser, setUser } from "./li
 import { api, invalidate, setUnauthorizedHandler } from "./lib/api.ts";
 import { dashboard } from "./views/dashboard.ts";
 import { search } from "./views/search.ts";
+import { salesView } from "./views/sales.ts";
 import { cardView } from "./views/card.ts";
 import { collection } from "./views/collection.ts";
 import { sets, setView } from "./views/sets.ts";
@@ -26,6 +27,7 @@ route("/karte/:id", cardView, () => BRAND, (p) => { api.card(p.id!).catch(() => 
 route("/sammlung", collection, () => tr("Meine Sammlung – {BRAND}", { BRAND }));
 route("/sets", sets, () => tr("Sets – {BRAND}", { BRAND }), () => { api.sets().catch(() => {}); });
 route("/sets/:id", setView, () => BRAND, (p, q) => { api.set(p.id!, q.get("sort") ?? "number").catch(() => {}); });
+route("/verkaeufe", salesView, () => tr("Verkäufe – {BRAND}", { BRAND }), (_p, q) => { api.salesFeed({ limit: 50, q: q.get("q"), card: q.get("card"), grader: q.get("grader"), grade: q.get("grade") }).catch(() => {}); });
 route("/markt", market, () => tr("Markt – {BRAND}", { BRAND }), (_p, q) => { api.movers(q.get("lang") === "en" ? "en" : "de").catch(() => {}); });
 route("/login", authView("login"), () => tr("Anmelden – {BRAND}", { BRAND }));
 route("/registrieren", authView("register"), () => tr("Registrieren – {BRAND}", { BRAND }));
@@ -48,11 +50,13 @@ const NAV: NavItem[] = [
   { href: "/scan", icon: icons.camera, label: "Scannen", match: (p) => p.startsWith("/scan"), hero: true, mobile: true },
   { href: "/suche", icon: icons.search, label: "Suche", match: (p) => p.startsWith("/suche") || p.startsWith("/karte"), desktop: true, mobile: true },
   { href: "/sets", icon: icons.sets, label: "Sets", match: (p) => p.startsWith("/sets"), desktop: true },
+  { href: "/verkaeufe", icon: icons.flag, label: "Verkäufe", match: (p) => p.startsWith("/verkaeufe"), desktop: true },
   { href: "/markt", icon: icons.market, label: "Markt", match: (p) => p.startsWith("/markt"), desktop: true },
   { href: "/import", icon: icons.download, label: "Import", match: (p) => p.startsWith("/import"), desktop: true },
 ];
 const MORE: Array<{ href: string; icon: string; label: string; sub: string }> = [
   { href: "/sets", icon: icons.sets, label: "Sets", sub: "Alle Erweiterungen, Fortschritt" },
+  { href: "/verkaeufe", icon: icons.flag, label: "Verkäufe", sub: "Letzte Verkäufe mit Note, Verkaufsart, Preis" },
   { href: "/markt", icon: icons.market, label: "Markt", sub: "Auf- und Absteiger" },
   { href: "/import", icon: icons.download, label: "Import", sub: "Collectr, Card Ladder, CSV, PSA" },
   { href: "/watchlist", icon: icons.eye, label: "Watchlist", sub: "Beobachtete Karten" },

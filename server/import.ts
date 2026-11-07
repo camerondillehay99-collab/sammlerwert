@@ -8,6 +8,7 @@ import type { CardSummary, Condition, Language, Variant } from "../shared/types.
 import { findCandidates, numberKey, parseNumber, type ScanFacts } from "./scan.ts";
 import { getCardSummaries } from "./services/catalog.ts";
 import { lookupCert, certToFacts, psaConfigured } from "./psa.ts";
+import { populationFromCert } from "./services/population.ts";
 
 export type ImportSource = "collectr" | "cardladder" | "tcgplayer" | "sammlerwert" | "psa" | "generic";
 
@@ -261,6 +262,17 @@ export async function previewImport(db: SqlDb, text: string, opts: ImportOptions
     row.alternatives = cands.slice(1, 4).map((c) => c.card);
     row.status = confidence >= 0.75 ? "ok" : confidence >= 0.35 ? "unsure" : "none";
     if (row.status === "none") row.problem ??= "Unsicher – bitte Karte wählen.";
+  }
+  // Confident PSA matches teach us the card's PSA spec (→ population report); best effort, never blocks the import.
+  for (const r of rows) {
+    const certNo = r.parsed?.certNo;
+    if (r.status === "ok" && r.match && certNo && r.parsed?.gradingCompany === "PSA") {
+      const cert = await db.first<{ payload: string; card_id: string | null }>("SELECT payload, card_id FROM psa_certs WHERE cert_no = ?", [certNo]).catch(() => null);
+      if (cert && cert.payload !== "null") {
+        if (!cert.card_id) await db.run("UPDATE psa_certs SET card_id = ? WHERE cert_no = ?", [r.match.card.id, certNo]).catch(() => {});
+        await populationFromCert(db, r.match.card.id, (JSON.parse(cert.payload) as { specId?: number | null }).specId ?? null).catch(() => {});
+      }
+    }
   }
   const stats = { total: rows.length, ok: 0, unsure: 0, none: 0, skip: 0 };
   for (const r of rows) stats[r.status]++;

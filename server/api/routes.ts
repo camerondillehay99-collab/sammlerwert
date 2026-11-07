@@ -10,6 +10,8 @@ import { ebayConfigured } from "../ingest/ebay.ts";
 import { blobStore } from "../storage.ts";
 import { scanAvailable, scanImage } from "../scan.ts";
 import { UI_LANGS, uiDictionary, i18nLastError } from "../i18n.ts";
+import { getPopulations, refreshPsaPopulation, PopError } from "../services/population.ts";
+import { resolveCert } from "../psa.ts";
 
 import { add } from "./router.ts";
 export { matchRoute, hasPath } from "./router.ts";
@@ -74,8 +76,9 @@ add("GET", "/api/market/sales", async (req, _p, db) => {
   const u = new URL(req.url);
   const g = (k: string) => u.searchParams.get(k);
   const grade = g("grade") ? Number(g("grade")) : null;
-  const r = await recentSales(db, { grader: g("grader"), grade: grade != null && Number.isFinite(grade) ? grade : null, condition: g("condition"), setId: g("set"), source: g("source"), listingType: g("type"),
-    graded: g("graded") === "1" ? true : g("graded") === "0" ? false : null, minPrice: g("min") ? Number(g("min")) : null, limit: Number(g("limit") ?? 50), offset: Number(g("offset") ?? 0) });
+  const r = await recentSales(db, { grader: g("grader"), grade: grade != null && Number.isFinite(grade) ? grade : null, condition: g("condition"), setId: g("set"), cardId: g("card"), language: g("lang"), source: g("source"), listingType: g("type"),
+    graded: g("graded") === "1" ? true : g("graded") === "0" ? false : null, minPrice: g("min") ? Number(g("min")) : null, q: g("q"),
+    sort: g("sort") === "price" ? "price" : "date", dir: g("dir") === "asc" ? "asc" : "desc", limit: Number(g("limit") ?? 50), offset: Number(g("offset") ?? 0) });
   return json(r, 200, { "cache-control": "public, max-age=120" });
 });
 add("GET", "/api/sets", async (_r, _p, db) => json({ items: await listSets(db) }, 200, { "cache-control": "public, max-age=300" }));
@@ -90,6 +93,29 @@ add("GET", "/api/cards/:id", async (_r, p, db) => {
   const card = await getCardDetail(db, p.id!);
   if (!card) throw notFound("Karte nicht gefunden.");
   return json(card, 200, { "cache-control": "public, max-age=60" });
+});
+add("GET", "/api/cards/:id/population", async (_r, p, db) => json({ items: await getPopulations(db, p.id!) }, 200, { "cache-control": "public, max-age=300" }));
+/** Logged-in users may trigger a PSA population refresh for a card they can name a PSA cert for (one PSA call: cert → spec → pop). */
+add("POST", "/api/cards/:id/population", async (req, p, db) => {
+  await requireUser(db, req);
+  const b = await readJson<Record<string, unknown>>(req);
+  const card = (await getCardSummaries(db, [p.id!])).get(p.id!);
+  if (!card) throw notFound("Karte nicht gefunden.");
+  const existing = (await getPopulations(db, card.id)).find((x) => x.company === "PSA");
+  const fresh = existing && Date.now() - Date.parse(existing.fetchedAt) < 86_400_000;
+  if (fresh) return json({ items: await getPopulations(db, card.id), refreshed: false });
+  let specId = existing?.specId ?? null;
+  if (!specId && b.cert) {
+    const r = await resolveCert(db, String(b.cert));
+    if (!r.cert) throw badRequest("PSA kennt dieses Zertifikat nicht.");
+    if (r.cert.specId == null) throw badRequest("PSA liefert für dieses Zertifikat keine Spec-ID.");
+    specId = String(r.cert.specId);
+    await db.run("UPDATE psa_certs SET card_id = ? WHERE cert_no = ?", [card.id, r.cert.certNo]).catch(() => {});
+  }
+  if (!specId) throw badRequest("Für diese Karte ist noch keine PSA-Spec bekannt – bitte eine PSA-Zertifikatsnummer der Karte angeben.");
+  try { await refreshPsaPopulation(db, card.id, specId); }
+  catch (e) { if (e instanceof PopError) throw new ApiError(e.status === 429 ? 429 : 502, e.message); throw e; }
+  return json({ items: await getPopulations(db, card.id), refreshed: true });
 });
 add("GET", "/api/cards/:id/snapshot", async (_r, p, db) => {
   const snap = await getCardSnapshot(db, p.id!);
